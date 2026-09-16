@@ -23,6 +23,7 @@ namespace OMNIX.Word
         private readonly Dictionary<IntPtr, WorkspaceController> _controllers = new Dictionary<IntPtr, WorkspaceController>();
         private bool _clamping;
         private bool _disposed;
+        private System.Windows.Forms.Timer _startupTimer;
 
         public WordTaskPaneService(ThisAddIn addIn, IHostAdapter adapter)
         {
@@ -35,11 +36,15 @@ namespace OMNIX.Word
             if (_disposed) return;
             _addIn.Application.WindowActivate += OnWindowActivate;
             _addIn.Application.WindowSelectionChange += OnWindowSelectionChange;
+            _startupTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+            _startupTimer.Tick += OnStartupTick;
+            _startupTimer.Start();
             Logger.Startup("WordTaskPaneService events attached");
         }
 
         public void DetachEvents()
         {
+            if (_startupTimer != null) { _startupTimer.Stop(); _startupTimer.Dispose(); _startupTimer = null; }
             try
             {
                 _addIn.Application.WindowActivate -= OnWindowActivate;
@@ -54,11 +59,31 @@ namespace OMNIX.Word
             catch { return IntPtr.Zero; }
         }
 
+        private void OnStartupTick(object sender, EventArgs args)
+        {
+            if (_disposed) return;
+            try {
+                var window = _addIn.Application.ActiveWindow;
+                IntPtr key = KeyOf(window);
+                if (key == IntPtr.Zero) return;
+                ShowNewWindow(key, window);
+                _startupTimer.Stop();
+            } catch (Exception ex) { Logger.Error("ui", "Deferred startup workspace failed", ex); }
+        }
+
+        private void ShowNewWindow(IntPtr key, object window)
+        {
+            if (_disposed || key == IntPtr.Zero || _panes.ContainsKey(key)) return;
+            var pane = EnsurePane(key, window);
+            if (pane != null) pane.Visible = true;
+        }
+
         private void OnWindowActivate(Wd.Document doc, Wd.Window wn)
         {
             try
             {
                 IntPtr key = KeyOf(wn);
+                ShowNewWindow(key, wn);
                 WorkspaceController controller;
                 if (_controllers.TryGetValue(key, out controller) && controller != null)
                     controller.RefreshContextBar();
@@ -81,7 +106,7 @@ namespace OMNIX.Word
             catch { }
         }
 
-        private CustomTaskPane EnsurePane(IntPtr key)
+        private CustomTaskPane EnsurePane(IntPtr key, object ownerWindow = null)
         {
             if (_disposed || key == IntPtr.Zero) return null;
 
@@ -95,7 +120,12 @@ namespace OMNIX.Word
             _controllers[key] = controller;
 
             var hostControl = new TaskPaneHostControl(controller.View);
-            pane = _addIn.CustomTaskPanes.Add(hostControl, "OMNIX", window);
+            try { pane = _addIn.CustomTaskPanes.Add(hostControl, "OMNIX", window); }
+            catch {
+                _controllers.Remove(key);
+                try { controller.Dispose(); } finally { hostControl.Dispose(); }
+                throw;
+            }
             pane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight;
             try { pane.Width = DefaultWidth; } catch { }
             pane.VisibleChanged += OnPaneVisibleChanged;
@@ -187,7 +217,8 @@ namespace OMNIX.Word
             if (key == IntPtr.Zero) return;
             CustomTaskPane pane = EnsurePane(key);
             if (pane == null) return;
-            pane.Visible = !pane.Visible;
+            // Open Workspace is idempotent; closing uses the pane close button.
+            pane.Visible = true;
         }
 
         public void ShowSettings()
@@ -206,6 +237,7 @@ namespace OMNIX.Word
         {
             if (_disposed) return;
             _disposed = true;
+            DetachEvents();
 
             foreach (var controller in _controllers.Values)
             {

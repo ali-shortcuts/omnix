@@ -145,17 +145,25 @@ jobs:
           $dest = "installer\payload\vstor_redist.exe"
           $ProgressPreference = 'SilentlyContinue'
           Invoke-WebRequest `
-            -Uri "https://download.microsoft.com/download/C/0/0/C001737F-822B-48C2-8F6A-CDE13B4B9E9C/vstor_redist.exe" `
+            -Uri "https://download.microsoft.com/download/8/6/4/8641e164-7796-4b34-81c7-30d24a5bd533/vstor_redist.exe" `
             -OutFile $dest `
             -UseBasicParsing `
             -TimeoutSec 180
           $size = (Get-Item $dest).Length
           if ($size -lt 10000000) { throw "vstor_redist.exe is unexpectedly small ($size bytes)." }
-          Write-Host "Bundled Microsoft VSTO Runtime: $size bytes"
+          $signature = Get-AuthenticodeSignature -LiteralPath $dest
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw 'Microsoft VSTO Runtime signature could not be verified.'
+          }
+          Write-Host "Bundled Microsoft VSTO Runtime: $size bytes; verified Microsoft signature"
 
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup -y --no-progress
+
+      - name: Execute actual installer prerequisite decision regressions
+        shell: powershell
+        run: ./build/runtime-policy-acceptance.ps1
 
       - name: Compile development single-exe installer
         shell: pwsh
@@ -312,6 +320,7 @@ jobs:
             build/artifact/privacy-acceptance.json
             build/artifact/history-storage-acceptance.json
             build/artifact/office-registration-maintenance-audit.json
+            build/artifact/runtime-policy-acceptance.json
             build/artifact/inno-compile.log
             build/defender-report.txt
             build/logs/*.binlog

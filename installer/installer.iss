@@ -70,6 +70,8 @@ var
   VstoRestartNeeded: Boolean;
   MaintenanceTaskInstalled: Boolean;
 
+#include "runtime-policy.iss"
+
 procedure InstallLog(const Line: String);
 var
   LogDir, Full: String;
@@ -162,16 +164,24 @@ begin
   InstallLog('Detected supported Office hosts: ' + HostsSummary());
 end;
 
-function VstoRuntimeInstalled(): Boolean;
-var Ver: String;
+function RuntimeInView(const View: Integer; const KeyName: String): Boolean;
+var Ver: String; Major: Integer;
 begin
   Result := False;
-  if IsWin64 then
-    Result := RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\VSTO Runtime Setup\v4R', 'Version', Ver);
-  if not Result then
-    Result := RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\VSTO Runtime Setup\v4R', 'Version', Ver);
-  if Result then Result := Trim(Ver) <> '';
+  if not RegQueryStringValue(View, 'SOFTWARE\Microsoft\VSTO Runtime Setup\' + KeyName, 'Version', Ver) then exit;
+  if Pos('.', Ver) = 0 then exit;
+  Major := StrToIntDef(Copy(Ver, 1, Pos('.', Ver)-1), 0);
+  if Major < 10 then exit;
+  Result := True;
+end;
+
+function VstoRuntimeInstalled(): Boolean;
+begin
+  { Both Microsoft registration variants are valid; do not mistake v4 for missing runtime. }
+  Result := RuntimeInView(HKLM32, 'v4R') or RuntimeInView(HKLM32, 'v4');
+  if IsWin64 then Result := Result or RuntimeInView(HKLM64, 'v4R') or RuntimeInView(HKLM64, 'v4');
   InstallLog('VSTO Runtime present=' + B2S(Result));
+  if Result then RegDeleteValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested');
 end;
 
 procedure PreserveOfficeResiliencyState();
@@ -286,7 +296,7 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var VstoExe: String; ResultCode: Integer;
+var VstoExe: String; ResultCode, Decision: Integer; RecoveryRequested: Cardinal;
 begin
   Result := '';
   NeedsRestart := False;
@@ -329,30 +339,26 @@ begin
         exit;
       end;
       InstallLog('VSTO Runtime prerequisite exit=' + IntToStr(ResultCode));
-      if ResultCode = 3010 then
+      RecoveryRequested := 0;
+      RegQueryDWordValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested', RecoveryRequested);
+      Decision := RuntimeDecision(ResultCode, VstoRuntimeInstalled(), RecoveryRequested <> 0);
+      if (Decision = 1) or (Decision = 4) then
       begin
+        RegWriteDWordValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested', 1);
         VstoRestartNeeded := True;
         NeedsRestart := True;
-        Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
+        if Decision = 1 then
+          Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.'
+        else
+          Result := 'Microsoft reported success, but OMNIX cannot verify VSTO Runtime. Restart Windows once and retry. If verification still fails, repair Microsoft VSTO Runtime and inspect install-debug.log.';
         exit;
       end;
-      if (ResultCode = 0) and (not VstoRuntimeInstalled()) then
+      if Decision = 2 then
       begin
-        // Real-world evidence (from an actual user machine, not a guess):
-        // vstor_redist.exe can report success (exit 0, not the documented
-        // 3010) while required files were locked/in-use from a prior partial
-        // install attempt, and the registry marker only appears after an
-        // actual restart. Exit 0 is not a hard failure the way a genuine
-        // nonzero code is — treat this specific combination as "probably
-        // needs a restart too", the same as the documented 3010 case,
-        // instead of aborting the whole install with a failure message.
-        InstallLog('Exit 0 but VSTO Runtime still not verified — treating as a likely pending-restart case, same as exit 3010.');
-        VstoRestartNeeded := True;
-        NeedsRestart := True;
-        Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
+        Result := 'VSTO Runtime remains unverified after a recovery restart was requested. If you already restarted, repair Microsoft VSTO Runtime and inspect install-debug.log. Repeated restarts are not a confirmed fix. The existing installation was preserved.';
         exit;
       end;
-      if (ResultCode <> 0) or (not VstoRuntimeInstalled()) then
+      if Decision <> 0 then
       begin
         Result := 'Microsoft VSTO Runtime installation failed (exit ' + IntToStr(ResultCode) + '). The existing OMNIX installation was preserved.';
         exit;

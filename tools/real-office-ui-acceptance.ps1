@@ -157,6 +157,7 @@ function Test-HostUi($officeHost) {
         RibbonTabActivated = $false
         OpenWorkspaceButtonFound = $false
         OpenWorkspaceInvoked = $false
+        AutomaticWorkspaceVisible = $false
         WorkspaceEvidenceFound = $false
         WorkspaceEvidenceAutomationId = $null
         WorkspaceEvidenceName = $null
@@ -182,6 +183,16 @@ function Test-HostUi($officeHost) {
 
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
         if ($null -eq $root) { throw 'UI Automation could not attach to the Office window.' }
+
+        # Check before invoking the ribbon: a click must not mask broken automatic startup.
+        $automaticDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        do {
+            $automaticPane = Find-UiElementByAutomationId $root 'OMNIX.ChatInput'
+            if ($null -eq $automaticPane) { $automaticPane = Find-UiElementByAutomationId $root 'OMNIX.WorkspaceRoot' }
+            $result.AutomaticWorkspaceVisible = Test-UiElementVisible $automaticPane
+            if ($result.AutomaticWorkspaceVisible) { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $automaticDeadline)
 
         $tab = Find-UiElementByExactName $root 'OMNIX'
         if ($null -eq $tab) { $tab = Find-UiElementByNameFragment $root @('OMNIX') }
@@ -212,6 +223,7 @@ function Test-HostUi($officeHost) {
 
         $result.Pass = [bool](
             $result.Started -and
+            $result.AutomaticWorkspaceVisible -and
             $result.WindowHandleFound -and
             $result.RibbonTabFound -and
             $result.RibbonTabActivated -and
