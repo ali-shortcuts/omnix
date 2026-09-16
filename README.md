@@ -1,3 +1,5 @@
+> **Canonical development:** use `main`. The separate `rebuild/native-v4` preview line is superseded; see [reconciliation](docs/UNIFIED-DEVELOPMENT.md). For installation tests without changing your primary computer, see the [isolated Office VM lab](docs/ISOLATED-OFFICE-LAB.md). Real Office/reboot acceptance remains required.
+
 # OMNIX — Native AI Bridge for Microsoft Office
 
 OMNIX is a Windows Office AI bridge: a native **C# / WPF / VSTO** add-in that connects **Excel, Word and PowerPoint** to local AI runtimes, cloud providers and custom OpenAI-compatible endpoints from one docked workspace inside Office.

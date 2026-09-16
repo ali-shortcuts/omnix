@@ -37,6 +37,8 @@ jobs:
           fetch-depth: 1
 
       - name: Resolve source and prerelease tag
+        env:
+          REQUESTED_PREVIEW_TAG: ${{ inputs.tag }}
         id: meta
         shell: bash
         run: |
@@ -47,9 +49,9 @@ jobs:
             exit 1
           fi
 
-          requested='${{ inputs.tag }}'
+          requested="$REQUESTED_PREVIEW_TAG"
           if [[ -z "$requested" ]]; then
-            tag="v3.0.0-dev.${GITHUB_RUN_NUMBER}"
+            tag="v4.0.0-preview.${GITHUB_RUN_NUMBER}"
           else
             tag="$requested"
           fi
@@ -287,7 +289,7 @@ jobs:
         shell: bash
         run: |
           cat > release-input/RELEASE-NOTES.md <<'EOF'
-          # OMNIX v3 Development Preview — privacy, installer, runtime evidence and source integrity
+          # OMNIX Unified Development Preview — privacy, installer, runtime evidence and source integrity
 
           This prerelease is tied to one exact source commit. The attached installer, manifest,
           complete-source ZIP, runtime-hardening evidence bundle and CI provenance record are all
@@ -352,7 +354,7 @@ jobs:
             release-input/manifest.json \
             --repo "$GITHUB_REPOSITORY" \
             --target "$source_sha" \
-            --title "OMNIX v3 Development Preview ${{ steps.meta.outputs.short_sha }}" \
+            --title "OMNIX Unified Development Preview ${{ steps.meta.outputs.short_sha }}" \
             --notes-file release-input/RELEASE-NOTES.md \
             --prerelease
 

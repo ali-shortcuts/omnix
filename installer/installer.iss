@@ -70,6 +70,8 @@ var
   VstoRestartNeeded: Boolean;
   MaintenanceTaskInstalled: Boolean;
 
+#include "runtime-policy.iss"
+
 procedure InstallLog(const Line: String);
 var
   LogDir, Full: String;
@@ -162,16 +164,24 @@ begin
   InstallLog('Detected supported Office hosts: ' + HostsSummary());
 end;
 
-function VstoRuntimeInstalled(): Boolean;
-var Ver: String;
+function RuntimeInView(const View: Integer; const KeyName: String): Boolean;
+var Ver: String; Major: Integer;
 begin
   Result := False;
-  if IsWin64 then
-    Result := RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\VSTO Runtime Setup\v4R', 'Version', Ver);
-  if not Result then
-    Result := RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\VSTO Runtime Setup\v4R', 'Version', Ver);
-  if Result then Result := Trim(Ver) <> '';
+  if not RegQueryStringValue(View, 'SOFTWARE\Microsoft\VSTO Runtime Setup\' + KeyName, 'Version', Ver) then exit;
+  if Pos('.', Ver) = 0 then exit;
+  Major := StrToIntDef(Copy(Ver, 1, Pos('.', Ver)-1), 0);
+  if Major < 10 then exit;
+  Result := True;
+end;
+
+function VstoRuntimeInstalled(): Boolean;
+begin
+  { Both Microsoft registration variants are valid; do not mistake v4 for missing runtime. }
+  Result := RuntimeInView(HKLM32, 'v4R') or RuntimeInView(HKLM32, 'v4');
+  if IsWin64 then Result := Result or RuntimeInView(HKLM64, 'v4R') or RuntimeInView(HKLM64, 'v4');
   InstallLog('VSTO Runtime present=' + B2S(Result));
+  if Result then RegDeleteValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested');
 end;
 
 procedure PreserveOfficeResiliencyState();
@@ -195,11 +205,27 @@ begin
   if RegKeyExists(HKCU, Key) then RegDeleteKeyIncludingSubkeys(HKCU, Key);
 end;
 
-procedure RemoveAddinRegistry();
+procedure RemoveOwnedRegistration(const Key, Host: String);
+var Actual, Expected: String;
 begin
-  RemoveHostRegistration('Excel');
-  RemoveHostRegistration('Word');
-  RemoveHostRegistration('PowerPoint');
+  Expected := ExpandConstant('{app}') + '\OMNIX.' + Host + '.vsto';
+  StringChange(Expected, '\', '/');
+  Expected := 'file:///' + Expected + '|vstolocal';
+  if RegQueryStringValue(HKCU, Key, 'Manifest', Actual) then
+    if CompareText(Actual, Expected) = 0 then RegDeleteKeyIncludingSubkeys(HKCU, Key)
+    else InstallLog('UNINSTALL: preserved registration owned by another installation: ' + Key);
+end;
+
+procedure RemoveAddinRegistry();
+var I: Integer; Host: String;
+begin
+  for I := 0 to 2 do
+  begin
+    if I = 0 then Host := 'Excel' else if I = 1 then Host := 'Word' else Host := 'PowerPoint';
+    RemoveOwnedRegistration(Format(CanonicalRegAddinsFmt, [Host]), Host);
+    RemoveOwnedRegistration(Format(LegacyRegAddinsFmt, ['16.0', Host]), Host);
+    RemoveOwnedRegistration(Format(LegacyRegAddinsFmt, ['15.0', Host]), Host);
+  end;
 end;
 
 function ManifestUri(const Host: String): String;
@@ -286,7 +312,7 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var VstoExe: String; ResultCode: Integer;
+var VstoExe: String; ResultCode, Decision: Integer; RecoveryRequested: Cardinal;
 begin
   Result := '';
   NeedsRestart := False;
@@ -329,30 +355,26 @@ begin
         exit;
       end;
       InstallLog('VSTO Runtime prerequisite exit=' + IntToStr(ResultCode));
-      if ResultCode = 3010 then
+      RecoveryRequested := 0;
+      RegQueryDWordValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested', RecoveryRequested);
+      Decision := RuntimeDecision(ResultCode, VstoRuntimeInstalled(), RecoveryRequested <> 0);
+      if (Decision = 1) or (Decision = 4) then
       begin
+        RegWriteDWordValue(HKCU, 'Software\OMNIX\Setup', 'RuntimeRecoveryRequested', 1);
         VstoRestartNeeded := True;
         NeedsRestart := True;
-        Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
+        if Decision = 1 then
+          Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.'
+        else
+          Result := 'Microsoft reported success, but OMNIX cannot verify VSTO Runtime. Restart Windows once and retry. If verification still fails, repair Microsoft VSTO Runtime and inspect install-debug.log.';
         exit;
       end;
-      if (ResultCode = 0) and (not VstoRuntimeInstalled()) then
+      if Decision = 2 then
       begin
-        // Real-world evidence (from an actual user machine, not a guess):
-        // vstor_redist.exe can report success (exit 0, not the documented
-        // 3010) while required files were locked/in-use from a prior partial
-        // install attempt, and the registry marker only appears after an
-        // actual restart. Exit 0 is not a hard failure the way a genuine
-        // nonzero code is — treat this specific combination as "probably
-        // needs a restart too", the same as the documented 3010 case,
-        // instead of aborting the whole install with a failure message.
-        InstallLog('Exit 0 but VSTO Runtime still not verified — treating as a likely pending-restart case, same as exit 3010.');
-        VstoRestartNeeded := True;
-        NeedsRestart := True;
-        Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
+        Result := 'VSTO Runtime remains unverified after a recovery restart was requested. If you already restarted, repair Microsoft VSTO Runtime and inspect install-debug.log. Repeated restarts are not a confirmed fix. The existing installation was preserved.';
         exit;
       end;
-      if (ResultCode <> 0) or (not VstoRuntimeInstalled()) then
+      if Decision <> 0 then
       begin
         Result := 'Microsoft VSTO Runtime installation failed (exit ' + IntToStr(ResultCode) + '). The existing OMNIX installation was preserved.';
         exit;
@@ -381,10 +403,9 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  I, ResultCode, CertClassResult: Integer;
+  I, ResultCode: Integer;
   AllOk: Boolean;
-  CertPath, CertClassifier, CertMarker, DevThumbprintText: String;
-  DevThumbprintRaw: AnsiString;
+  CertPath, CertClassifier: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -399,44 +420,28 @@ begin
   begin
     AllOk := True;
 
-    CertPath := ExpandConstant('{app}') + '\OMNIX.cer';
-    CertClassifier := ExpandConstant('{app}') + '\classify-dev-cert.ps1';
-    CertMarker := ExpandConstant('{app}') + '\dev-cert-thumbprint.txt';
-    DeleteFile(CertMarker);
-
-    if FileExists(CertPath) and FileExists(CertClassifier) then
-    begin
-      Exec('powershell.exe', '-NoProfile -File "' + CertClassifier + '" -CertPath "' + CertPath + '" -OutputPath "' + CertMarker + '"', '', SW_HIDE, ewWaitUntilTerminated, CertClassResult);
-      if CertClassResult = 0 then
-      begin
-        DevThumbprintRaw := '';
-        if LoadStringFromFile(CertMarker, DevThumbprintRaw) then DevThumbprintText := Trim(DevThumbprintRaw) else DevThumbprintText := '';
-        if DevThumbprintText = '' then AllOk := False
-        else
-        begin
-          Exec(ExpandConstant('{cmd}'), '/C certutil -f -user -addstore ' + TrustedPubStore + ' "' + CertPath + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-          if ResultCode <> 0 then AllOk := False;
-          Exec(ExpandConstant('{cmd}'), '/C certutil -f -user -addstore ' + RootStore + ' "' + CertPath + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-          if ResultCode <> 0 then AllOk := False;
-        end;
-      end
-      else if CertClassResult = 2 then
-        InstallLog('CA/non-self-signed publisher certificate detected: no OMNIX trust-store modification performed.')
-      else
-        AllOk := False;
-    end
-    else
-    begin
-      InstallLog('CERTIFICATE_ERROR: OMNIX.cer/classifier missing.');
-      AllOk := False;
-    end;
-
+    CertPath := ExpandConstant('{app}') + '\install-vsto-trust.ps1';
+    CertClassifier := '-NoProfile -File "' + CertPath + '" -InstallDir "' + ExpandConstant('{app}') + '" -HostNames "';
     for I := 0 to HostList.Count - 1 do
-      if not RegisterHost(HostList[I]) then AllOk := False;
+    begin
+      if I > 0 then CertClassifier := CertClassifier + ',';
+      CertClassifier := CertClassifier + HostList[I];
+    end;
+    CertClassifier := CertClassifier + '"';
+    if WizardSilent then CertClassifier := CertClassifier + ' -Silent';
+    if not FileExists(CertPath) then AllOk := False
+    else if not Exec('powershell.exe', CertClassifier, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then AllOk := False
+    else if ResultCode <> 0 then AllOk := False;
+    { No addstore operation: Microsoft VSTOInstaller owns normal deployment trust. }
 
-    if not RunRegistrationMaintenance() then AllOk := False;
+    if AllOk then
+      for I := 0 to HostList.Count - 1 do
+        if not RegisterHost(HostList[I]) then AllOk := False;
 
-    MaintenanceTaskInstalled := InstallMaintenanceTask();
+    if AllOk then
+      if not RunRegistrationMaintenance() then AllOk := False;
+
+    if AllOk then MaintenanceTaskInstalled := InstallMaintenanceTask();
     if not MaintenanceTaskInstalled then
       InstallLog('MAINTENANCE_WARNING: optional current-user re-scan task was not installed.');
 
@@ -468,6 +473,12 @@ begin
       SuppressibleMsgBox('OMNIX was installed and registered for: ' + HostsSummary() + #13#10#13#10 +
              'Open Excel, Word or PowerPoint. The OMNIX Ribbon tab should load automatically.', mbInformation, MB_OK, IDOK);
   end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := not (IsProcessRunning('excel.exe') or IsProcessRunning('winword.exe') or IsProcessRunning('powerpnt.exe'));
+  if not Result then SuppressibleMsgBox('Close Excel, Word and PowerPoint before uninstalling OMNIX.', mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
