@@ -336,6 +336,22 @@ begin
         Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
         exit;
       end;
+      if (ResultCode = 0) and (not VstoRuntimeInstalled()) then
+      begin
+        // Real-world evidence (from an actual user machine, not a guess):
+        // vstor_redist.exe can report success (exit 0, not the documented
+        // 3010) while required files were locked/in-use from a prior partial
+        // install attempt, and the registry marker only appears after an
+        // actual restart. Exit 0 is not a hard failure the way a genuine
+        // nonzero code is — treat this specific combination as "probably
+        // needs a restart too", the same as the documented 3010 case,
+        // instead of aborting the whole install with a failure message.
+        InstallLog('Exit 0 but VSTO Runtime still not verified — treating as a likely pending-restart case, same as exit 3010.');
+        VstoRestartNeeded := True;
+        NeedsRestart := True;
+        Result := 'Restart Windows to finish installing Microsoft VSTO Runtime, then run OMNIX Setup again.';
+        exit;
+      end;
       if (ResultCode <> 0) or (not VstoRuntimeInstalled()) then
       begin
         Result := 'Microsoft VSTO Runtime installation failed (exit ' + IntToStr(ResultCode) + '). The existing OMNIX installation was preserved.';
