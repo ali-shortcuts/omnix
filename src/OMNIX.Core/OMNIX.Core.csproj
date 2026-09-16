@@ -129,6 +129,7 @@
     <Compile Include="Util\Utils.cs" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Localization\Strings.xaml"><LogicalName>OMNIX.Core.Localization.Strings.source.xaml</LogicalName></EmbeddedResource>
     <Page Include="Localization\Strings.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>
     <Page Include="Theming\Themes\Dark.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>
     <Page Include="Theming\Themes\Light.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>

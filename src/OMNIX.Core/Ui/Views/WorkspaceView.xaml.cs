@@ -13,6 +13,7 @@ namespace OMNIX.Core.Ui
     public partial class WorkspaceView : UserControl
     {
         private readonly WorkspaceController _controller;
+        private bool _ready;
 
         public WorkspaceView(WorkspaceController controller)
         {
@@ -20,6 +21,8 @@ namespace OMNIX.Core.Ui
             _controller = controller;
             ChatPage.Initialize(controller);
             SettingsPage.Initialize(controller);
+            _ready = true;
+            TabChat.IsChecked = true;
         }
 
         public ChatView Chat { get { return ChatPage; } }
@@ -35,8 +38,8 @@ namespace OMNIX.Core.Ui
             ChatPage.CancelPending();
         }
 
-        private void ShowChat(object sender, RoutedEventArgs e) { ChatPage.Visibility = Visibility.Visible; SettingsPage.Visibility = Visibility.Collapsed; AboutPage.Visibility = Visibility.Collapsed; }
-        private void ShowSettings(object sender, RoutedEventArgs e) { ChatPage.Visibility = Visibility.Collapsed; SettingsPage.Visibility = Visibility.Visible; AboutPage.Visibility = Visibility.Collapsed; SettingsPage.OnShown(); }
-        private void ShowAbout(object sender, RoutedEventArgs e) { ChatPage.Visibility = Visibility.Collapsed; SettingsPage.Visibility = Visibility.Collapsed; AboutPage.Visibility = Visibility.Visible; }
+        private void ShowChat(object sender, RoutedEventArgs e) { if (!_ready) return; ChatPage.Visibility = Visibility.Visible; SettingsPage.Visibility = Visibility.Collapsed; AboutPage.Visibility = Visibility.Collapsed; }
+        private void ShowSettings(object sender, RoutedEventArgs e) { if (!_ready) return; ChatPage.Visibility = Visibility.Collapsed; SettingsPage.Visibility = Visibility.Visible; AboutPage.Visibility = Visibility.Collapsed; SettingsPage.OnShown(); }
+        private void ShowAbout(object sender, RoutedEventArgs e) { if (!_ready) return; ChatPage.Visibility = Visibility.Collapsed; SettingsPage.Visibility = Visibility.Collapsed; AboutPage.Visibility = Visibility.Visible; }
     }
 }

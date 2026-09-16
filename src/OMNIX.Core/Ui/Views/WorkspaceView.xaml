@@ -102,7 +102,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                     <RadioButton x:Name="TabChat" Style="{StaticResource TabToggle}"
-                                 GroupName="OmnixTabs" IsChecked="True"
+                                 GroupName="OmnixTabs"
                                  Content="{DynamicResource S.Tab.Chat}" Checked="ShowChat" />
                     <RadioButton x:Name="TabSettings" Style="{StaticResource TabToggle}"
                                  GroupName="OmnixTabs" Content="{DynamicResource S.Tab.Settings}" Checked="ShowSettings" />

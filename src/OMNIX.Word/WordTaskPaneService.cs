@@ -23,6 +23,8 @@ namespace OMNIX.Word
         private readonly Dictionary<IntPtr, WorkspaceController> _controllers = new Dictionary<IntPtr, WorkspaceController>();
         private bool _clamping;
         private bool _disposed;
+        private readonly HashSet<IntPtr> _automaticAttempts = new HashSet<IntPtr>();
+        private readonly HashSet<IntPtr> _creating = new HashSet<IntPtr>();
         private System.Windows.Forms.Timer _startupTimer;
 
         public WordTaskPaneService(ThisAddIn addIn, IHostAdapter adapter)
@@ -66,14 +68,15 @@ namespace OMNIX.Word
                 var window = _addIn.Application.ActiveWindow;
                 IntPtr key = KeyOf(window);
                 if (key == IntPtr.Zero) return;
+                _startupTimer.Stop(); // Stop before construction, including its failure path.
                 ShowNewWindow(key, window);
-                _startupTimer.Stop();
             } catch (Exception ex) { Logger.Error("ui", "Deferred startup workspace failed", ex); }
         }
 
         private void ShowNewWindow(IntPtr key, object window)
         {
             if (_disposed || key == IntPtr.Zero || _panes.ContainsKey(key)) return;
+            if (!_automaticAttempts.Add(key)) return; // One automatic attempt per window.
             var pane = EnsurePane(key, window);
             if (pane != null) pane.Visible = true;
         }
@@ -108,12 +111,19 @@ namespace OMNIX.Word
 
         private CustomTaskPane EnsurePane(IntPtr key, object ownerWindow = null)
         {
+            if (_disposed || key == IntPtr.Zero || !_creating.Add(key)) return null;
+            try { return CreatePane(key, ownerWindow); }
+            finally { _creating.Remove(key); }
+        }
+
+        private CustomTaskPane CreatePane(IntPtr key, object ownerWindow)
+        {
             if (_disposed || key == IntPtr.Zero) return null;
 
             CustomTaskPane pane;
             if (_panes.TryGetValue(key, out pane) && pane != null) return pane;
 
-            object window = _addIn.Application.ActiveWindow;
+            object window = ownerWindow ?? _addIn.Application.ActiveWindow;
             if (window == null) return null;
 
             var controller = new WorkspaceController(_adapter, ThisAddIn.SharedHistory);
@@ -199,6 +209,7 @@ namespace OMNIX.Word
                 return;
             }
 
+            _automaticAttempts.Remove(key);
             WorkspaceController controller;
             if (_controllers.TryGetValue(key, out controller))
             {

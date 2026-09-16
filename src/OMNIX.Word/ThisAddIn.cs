@@ -55,7 +55,11 @@ namespace OMNIX.Word
                 SharedHistory = new ChatHistoryStore();
                 var registry = new ProviderRegistry();
                 SharedGateway = new AiGateway(registry);
-                SharedGateway.ProbeLocalAsync();
+                System.Threading.Tasks.Task.Run(() => SharedGateway.ProbeLocalAsync()).ContinueWith(
+                    task => Logger.Error("gateway", "Initial local discovery failed", task.Exception.GetBaseException()),
+                    System.Threading.CancellationToken.None,
+                    System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted,
+                    System.Threading.Tasks.TaskScheduler.Default);
             }
         }
 

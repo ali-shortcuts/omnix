@@ -55,7 +55,6 @@ namespace OMNIX.Core.Ui
             // Per-workspace registry/adapters/gateway: no mutable provider state is shared between
             // two open documents. Local runtime discovery is asynchronous and never blocks pane UI.
             _gateway = new AiGateway.AiGateway(new ProviderRegistry());
-            ObserveBackground(_gateway.ProbeLocalAsync(), "initial local provider probe");
 
             _toolExecutor = new ToolExecutor();
             _toolExecutor.WriteConfirmation = preview =>
@@ -77,6 +76,7 @@ namespace OMNIX.Core.Ui
             View.Resources.MergedDictionaries.Add(Localization.Strings.Dictionary);
             Theming.ThemeManager.Instance.ThemeChanged += OnThemeChanged;
             RefreshContextBar(initial: true);
+            ObserveBackground(Task.Run(() => _gateway.ProbeLocalAsync()), "initial local provider probe");
         }
 
         // ------------------------------------------------------------------ lifecycle

@@ -82,6 +82,10 @@ jobs:
         shell: pwsh
         run: ./build/build-with-fallbacks.ps1 ${{ steps.cert.outputs.thumbprint }}
 
+      - name: Execute compiled WPF workspace startup regression
+        shell: powershell
+        run: ./build/workspace-startup-acceptance.ps1
+
       - name: Runtime AI Gateway privacy acceptance
         shell: powershell
         run: |
@@ -326,6 +330,7 @@ jobs:
             build/artifact/office-registration-maintenance-audit.json
             build/artifact/runtime-policy-acceptance.json
             build/artifact/setup-powershell-acceptance.json
+            build/artifact/workspace-startup-acceptance.json
             build/artifact/inno-compile.log
             build/defender-report.txt
             build/logs/*.binlog
