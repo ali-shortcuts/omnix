@@ -1,47 +1,58 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Windows;
-using OMNIX.Core.Logging;
+using System.Xml;
 
 namespace OMNIX.Core.Localization
 {
-    /// <summary>
-    /// Spec 10.7: UI strings live in a central Resource Dictionary (Localization/Strings.xaml),
-    /// never hard-coded in XAML or C#. English is the default; the architecture is ready for a
-    /// future Persian (RTL) dictionary swap without touching any view.
-    /// </summary>
+    /// <summary>One embedded string source, usable before WPF starts and from worker threads.</summary>
     public static class Strings
     {
-        // WPF dictionaries belong to the thread that loads them. Background diagnostics must
-        // not publish an empty/foreign-thread dictionary to the Office UI.
+        private static readonly Lazy<Dictionary<string, string>> Values =
+            new Lazy<Dictionary<string, string>>(LoadValues, true);
         [ThreadStatic]
         private static ResourceDictionary _dict;
+
+        private static Dictionary<string, string> LoadValues()
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            using (var stream = typeof(Strings).Assembly.GetManifestResourceStream("OMNIX.Core.Localization.Strings.source.xaml"))
+            {
+                if (stream == null) throw new InvalidOperationException("Embedded localization source is missing.");
+                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
+                using (var reader = XmlReader.Create(stream, settings))
+                {
+                    var document = new XmlDocument { XmlResolver = null };
+                    document.Load(reader);
+                    foreach (XmlNode node in document.DocumentElement.ChildNodes)
+                    {
+                        var element = node as XmlElement;
+                        if (element == null || element.LocalName != "String") continue;
+                        var key = element.GetAttribute("Key", "http://schemas.microsoft.com/winfx/2006/xaml");
+                        if (!string.IsNullOrEmpty(key)) result.Add(key, element.InnerText);
+                    }
+                }
+            }
+            return result;
+        }
 
         public static ResourceDictionary Dictionary
         {
             get
             {
                 if (_dict != null) return _dict;
-                // Relative component URI lets WPF initialize its pack URI support itself,
-                // including first use from a non-WPF Office/background entry point.
-                var loaded = new ResourceDictionary
-                {
-                    Source = new Uri("/OMNIX.Core;component/Localization/Strings.xaml", UriKind.Relative)
-                };
-                _dict = loaded; // Cache only after successful load; a failure can be retried.
-                return loaded;
+                var dictionary = new ResourceDictionary();
+                foreach (var item in Values.Value) dictionary.Add(item.Key, item.Value);
+                _dict = dictionary;
+                return dictionary;
             }
         }
 
-        /// <summary>Translate a key; falls back to the key itself when missing (honest diagnostics).</summary>
         public static string T(string key)
         {
-            try
-            {
-                if (Dictionary.Contains(key)) return Dictionary[key] as string;
-            }
-            catch { }
-            return key;
+            string value;
+            return Values.Value.TryGetValue(key, out value) ? value : key;
         }
     }
 }

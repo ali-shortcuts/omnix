@@ -73,9 +73,20 @@ $args = @('/nologo','/target:exe',('/out:' + $exe)) + @($refs | ForEach-Object {
 if ($LASTEXITCODE -ne 0) { throw 'WPF regression harness failed to compile.' }
 $stdout = Join-Path $bin 'workspace-startup-test.stdout'
 $stderr = Join-Path $bin 'workspace-startup-test.stderr'
-$p = Start-Process $exe -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+$info = New-Object Diagnostics.ProcessStartInfo
+$info.FileName = $exe
+$info.UseShellExecute = $false
+$info.RedirectStandardOutput = $true
+$info.RedirectStandardError = $true
+$p = New-Object Diagnostics.Process
+$p.StartInfo = $info
+[void]$p.Start()
+$outRead = $p.StandardOutput.ReadToEndAsync()
+$errRead = $p.StandardError.ReadToEndAsync()
 if (-not $p.WaitForExit(30000)) { $p.Kill(); throw 'WPF startup/dispatcher exceeded 30 seconds.' }
-$p.WaitForExit(); $p.Refresh()
+$p.WaitForExit()
+$outRead.Result | Set-Content $stdout
+$errRead.Result | Set-Content $stderr
 Get-Content $stdout | Write-Host
 Get-Content $stderr | Write-Host
 if ($p.ExitCode -ne 0) { throw "WPF startup regression failed ($($p.ExitCode))." }
