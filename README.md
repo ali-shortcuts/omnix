@@ -1,12 +1,36 @@
-> **Canonical development:** use `main`. The separate `rebuild/native-v4` preview line is superseded; see [reconciliation](docs/UNIFIED-DEVELOPMENT.md). For installation tests without changing your primary computer, see the [isolated Office VM lab](docs/ISOLATED-OFFICE-LAB.md). Real Office/reboot acceptance remains required.
+# omnix
 
-# OMNIX â€” Native AI Bridge for Microsoft Office
+Native AI workspace for Microsoft Office.
 
 OMNIX is a Windows Office AI bridge: a native **C# / WPF / VSTO** add-in that connects **Excel, Word and PowerPoint** to local AI runtimes, cloud providers and custom OpenAI-compatible endpoints from one docked workspace inside Office.
 
-> **Release status:** active v3 rebuild. The solution and development installer are built and hardened in Windows CI, but this repository does **not** call the current branch production-ready until the real-machine release gates in [issue #53](https://github.com/ali-shortcuts/OMNIX-v2/issues/53) pass. Green hosted CI is not a substitute for real desktop Excel/Word/PowerPoint.
+> **Release status:** unified v4 development preview. The solution and development installer are built and hardened in Windows CI, but this repository does **not** call the current branch production-ready until the real-machine release gates in [issue #53](https://github.com/ali-shortcuts/omnix/issues/53) pass. Green hosted CI is not a substitute for real desktop Excel/Word/PowerPoint.
 
-Download the newest **Development Preview** `.exe` from [GitHub Releases](https://github.com/ali-shortcuts/OMNIX-v2/releases). Development previews are intentionally marked `DEVELOPMENT_ONLY`; they are not production releases. This is the canonical native Office repository. The separate `OMINIX.exe` repository contains an older browser/server prototype; its executable is not this native installer. See the [repository audit and consolidation decision](docs/REPOSITORY-AUDIT-2026-09-10.md).
+## Download and install
+
+Download the Windows **.exe** from [the current release](https://github.com/ali-shortcuts/omnix/releases). Only the current development preview is retained; its source archive, checksums and CI evidence are attached to the same release.
+
+1. Close Excel, Word and PowerPoint.
+2. Run `OMNIX-AI-OFFICE-Setup-DEV.exe` and review the normal Microsoft deployment prompts.
+3. If the installer requests a Windows restart, restart and run Setup again.
+4. Open a document, workbook or presentation. OMNIX is designed to open its docked workspace automatically; this still requires real Office acceptance on the target environment.
+
+**Status:** CI builds and automated checks pass. Actual Office UI, restart and production signing approval remain pending. Do not treat a development preview as a fully validated production release.
+
+## Repository guide
+
+| Location | Purpose |
+| --- | --- |
+| `src/` | Shared core and Excel, Word, PowerPoint add-ins |
+| `installer/` | Windows setup and prerequisite handling |
+| `build/` | Packaging, checks and release evidence |
+| `tools/` | Diagnostics and real-machine acceptance |
+| `docs/` | Architecture and operating guides |
+| `.github/workflows/` | Automated builds and releases |
+
+Develop on **`main`**. See [unified development](docs/UNIFIED-DEVELOPMENT.md), [isolated Office testing](docs/ISOLATED-OFFICE-LAB.md), and [production acceptance](docs/PRODUCTION-EVIDENCE-RUNBOOK.md).
+
+## Installer behavior
 
 The installer checks Office, .NET Framework 4.8 and VSTO prerequisites before replacing existing files. Close all Office applications before installing. A prerequisite restart stops the upgrade so the existing installation is preserved. Post-install verification failure returns exit code `10`, including in silent mode.
 
@@ -77,7 +101,7 @@ OMNIX does not hard-code a permanent promise that a third-party cloud model is â
 
 ## Office integration scope
 
-The native v3 architecture targets **Windows desktop Microsoft Office environments that support VSTO**. The installer detects the Office generation/platform and only registers hosts found on the machine. Compatibility must be reported from evidence, not assumed.
+The native architecture targets **Windows desktop Microsoft Office environments that support VSTO**. The installer detects the Office generation/platform and only registers hosts found on the machine. Compatibility must be reported from evidence, not assumed.
 
 Use these support states when documenting a tested environment:
 
@@ -108,7 +132,7 @@ OMNIX does **not** clear shared `DisabledItems`/`CrashingAddinList` state to for
 
 ### Development manifest trust
 
-Current CI development builds use a temporary development manifest certificate. The installer only performs development trust handling when the bundled public certificate is classified as self-signed, records its exact thumbprint, and uninstall targets only that recorded development thumbprint. This is **development-only**, not the production trust model.
+Current CI development builds use a temporary development manifest certificate. Installation invokes Microsoft's VSTO deployment installer and requires normal deployment trust validation. It does not silently import a certificate into the trusted root store. Trust rejection or deployment failure stops integration. This is **development-only**, not the production trust model.
 
 Production release requires a normal trusted code-signing certificate and valid timestamped Authenticode evidence. `build/sign-production.ps1` signs using an already provisioned certificate in the Windows certificate/key provider; it does not create/export a private key or handle a PFX password.
 
