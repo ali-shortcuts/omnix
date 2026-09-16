@@ -20,6 +20,7 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\OMNIX",
     [string]$OutputPath = "$env:LOCALAPPDATA\OMNIX\logs\full-office-e2e.json",
     [switch]$SkipInstall,
+    [switch]$SilentInstall,
     [switch]$SkipAiRoundTrip
 )
 
@@ -57,6 +58,7 @@ Assert-OfficeClosed
 
 $installerEvidence = [ordered]@{
     Requested = (-not $SkipInstall)
+    SilentInstall = [bool]$SilentInstall
     Path = $null
     FileName = $null
     SizeBytes = $null
@@ -103,7 +105,10 @@ else {
         }
     }
 
-    $installArgs = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/LOG=' + $installLog))
+    # Allow the operator to review Microsoft's normal VSTO deployment trust prompt.
+    # Silent installation requires a candidate already trusted by this test profile.
+    $installArgs = @('/NORESTART',('/LOG="' + $installLog + '"'))
+    if ($SilentInstall) { $installArgs = @('/VERYSILENT','/SUPPRESSMSGBOXES') + $installArgs }
     $p = Start-Process -FilePath $installer.FullName -ArgumentList $installArgs -Wait -PassThru
     $installerEvidence.ExitCode = $p.ExitCode
     $installerEvidence.Pass = [bool]($p.ExitCode -eq 0 -and (Test-Path -LiteralPath (Join-Path $InstallDir 'OMNIX.Core.dll') -PathType Leaf))
