@@ -85,6 +85,27 @@ begin
   end;
 end;
 
+procedure LogHelperOutput(const S: String; const Error, FirstLine: Boolean);
+begin
+  InstallLog('HELPER_OUTPUT: ' + S);
+end;
+
+function RunSetupPowerShell(const Params: String; var ResultCode: Integer): Boolean;
+begin
+  Result := False;
+  ResultCode := -1;
+  InstallLog('HELPER_START: ' + Params);
+  try
+    { RemoteSigned applies to this child process only. Group Policy retains precedence. }
+    Result := ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-ExecutionPolicy RemoteSigned ' + Params, '', SW_SHOWNORMAL,
+      ewWaitUntilTerminated, ResultCode, @LogHelperOutput);
+  except
+    InstallLog('HELPER_LAUNCH_ERROR: ' + GetExceptionMessage);
+  end;
+  InstallLog('HELPER_EXIT: ' + IntToStr(ResultCode));
+end;
+
 function B2S(B: Boolean): String;
 begin
   if B then Result := 'yes' else Result := 'no';
@@ -269,7 +290,7 @@ begin
   Helper := ExpandConstant('{app}') + '\install-maintenance-task.ps1';
   if FileExists(Helper) then
   begin
-    Exec('powershell.exe', '-NoProfile -NonInteractive -File "' + Helper + '" -InstallDir "' + ExpandConstant('{app}') + '" -Remove', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    RunSetupPowerShell('-NoProfile -NonInteractive -File "' + Helper + '" -InstallDir "' + ExpandConstant('{app}') + '" -Remove', ResultCode);
     if ResultCode = 0 then exit;
   end;
   Exec(ExpandConstant('{sys}') + '\schtasks.exe', '/Delete /TN "' + MaintenanceTaskName + '" /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -281,7 +302,7 @@ begin
   Result := False;
   Helper := ExpandConstant('{app}') + '\install-maintenance-task.ps1';
   if not FileExists(Helper) then exit;
-  Exec('powershell.exe', '-NoProfile -NonInteractive -File "' + Helper + '" -InstallDir "' + ExpandConstant('{app}') + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  RunSetupPowerShell('-NoProfile -NonInteractive -File "' + Helper + '" -InstallDir "' + ExpandConstant('{app}') + '"', ResultCode);
   Result := (ResultCode = 0);
   InstallLog('Maintenance task install exit=' + IntToStr(ResultCode));
 end;
@@ -292,7 +313,7 @@ begin
   Result := False;
   ScriptPath := ExpandConstant('{app}') + '\office-registration-maintenance.ps1';
   if not FileExists(ScriptPath) then exit;
-  Exec('powershell.exe', '-NoProfile -NonInteractive -File "' + ScriptPath + '" -InstallDir "' + ExpandConstant('{app}') + '" -Quiet', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  RunSetupPowerShell('-NoProfile -NonInteractive -File "' + ScriptPath + '" -InstallDir "' + ExpandConstant('{app}') + '" -Quiet', ResultCode);
   Result := (ResultCode = 0);
   InstallLog('Immediate registration maintenance exit=' + IntToStr(ResultCode));
 end;
@@ -429,8 +450,12 @@ begin
     end;
     CertClassifier := CertClassifier + '"';
     if WizardSilent then CertClassifier := CertClassifier + ' -Silent';
-    if not FileExists(CertPath) then AllOk := False
-    else if not Exec('powershell.exe', CertClassifier, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then AllOk := False
+    if not FileExists(CertPath) then
+    begin
+      InstallLog('DEPLOYMENT_ERROR: install-vsto-trust.ps1 is missing.');
+      AllOk := False;
+    end
+    else if not RunSetupPowerShell(CertClassifier, ResultCode) then AllOk := False
     else if ResultCode <> 0 then AllOk := False;
     { No addstore operation: Microsoft VSTOInstaller owns normal deployment trust. }
 
@@ -441,15 +466,19 @@ begin
     if AllOk then
       if not RunRegistrationMaintenance() then AllOk := False;
 
-    if AllOk then MaintenanceTaskInstalled := InstallMaintenanceTask();
-    if not MaintenanceTaskInstalled then
-      InstallLog('MAINTENANCE_WARNING: optional current-user re-scan task was not installed.');
+    if AllOk then
+    begin
+      MaintenanceTaskInstalled := InstallMaintenanceTask();
+      if not MaintenanceTaskInstalled then
+        InstallLog('MAINTENANCE_WARNING: optional current-user re-scan task was not installed.');
+    end
+    else InstallLog('MAINTENANCE_SKIPPED: earlier deployment or registration failed.');
 
     if AllOk and (not VstoRestartNeeded) then
     begin
       if FileExists(ExpandConstant('{app}') + '\post-install-verify.ps1') then
       begin
-        if not Exec('powershell.exe', '-NoProfile -File "' + ExpandConstant('{app}') + '\post-install-verify.ps1"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+        if not RunSetupPowerShell('-NoProfile -File "' + ExpandConstant('{app}') + '\post-install-verify.ps1"', ResultCode) then
           AllOk := False;
         InstallLog('post-install-verify exit=' + IntToStr(ResultCode));
         if ResultCode <> 0 then AllOk := False;
