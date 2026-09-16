@@ -59,11 +59,82 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Padding" Value="4,3" />
         </Style>
+        <Style x:Key="ComboItem" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource B.Foreground}" />
+            <Setter Property="Background" Value="{DynamicResource B.Surface}" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource B.Accent}" />
+                                <Setter Property="Foreground" Value="{DynamicResource B.AccentForeground}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource B.Accent}" />
+                                <Setter Property="Foreground" Value="{DynamicResource B.AccentForeground}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource B.ForegroundDim}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="Combo" TargetType="ComboBox">
             <Setter Property="Background" Value="{DynamicResource B.Surface}" />
             <Setter Property="Foreground" Value="{DynamicResource B.Foreground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource B.Border}" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Padding" Value="4,3" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="MaxDropDownHeight" Value="260" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ComboItem}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4" />
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent">
+                                            <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{DynamicResource B.Foreground}" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="SelectedContent" Margin="6,4,28,4" VerticalAlignment="Center" IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" />
+                            <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" Margin="6,4,28,4" VerticalContentAlignment="Center"
+                                     Background="{TemplateBinding Background}" Foreground="{TemplateBinding Foreground}" CaretBrush="{TemplateBinding Foreground}"
+                                     BorderThickness="0" IsReadOnly="{TemplateBinding IsReadOnly}" />
+                            <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="None">
+                                <Border x:Name="DropDownBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                        MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEditable" Value="True">
+                                <Setter TargetName="SelectedContent" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.65" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="Radio" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource B.Foreground}" />
@@ -78,7 +149,7 @@
         </Style>
     </UserControl.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10,6">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="10,6">
         <StackPanel>
 
             <!-- ============ Provider ============ -->
@@ -138,11 +209,14 @@
                       Content="{DynamicResource S.Settings.PreferLocal}" />
 
             <!-- ============ Custom provider ============ -->
-            <TextBlock Text="{DynamicResource S.Settings.CustomProvider}" Style="{StaticResource Section}" />
+            <StackPanel x:Name="CustomProviderSection" Visibility="Collapsed">
+            <TextBlock Text="{DynamicResource S.Settings.CustomProvider}" Style="{StaticResource Section}" TextWrapping="Wrap" />
             <TextBlock Text="{DynamicResource S.Settings.CustomName}" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="CustomNameBox" Style="{StaticResource Input}" />
             <TextBlock Text="{DynamicResource S.Settings.CustomBaseUrl}" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="CustomBaseUrlBox" Style="{StaticResource Input}" />
+
+            </StackPanel>
 
             <!-- ============ Privacy ============ -->
             <TextBlock Text="{DynamicResource S.Settings.PrivacyMode}" Style="{StaticResource Section}" />
@@ -161,7 +235,7 @@
                 <ComboBoxItem Content="{DynamicResource S.Settings.Theme.Dark}" Tag="Dark" />
             </ComboBox>
             <TextBlock Text="{DynamicResource S.Settings.Language}" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="LanguageCombo" Style="{StaticResource Combo}">
+            <ComboBox x:Name="LanguageCombo" Style="{StaticResource Combo}" SelectedIndex="0">
                 <ComboBoxItem Content="English" Tag="en" />
                 <ComboBoxItem Content="فارسی (coming soon)" Tag="fa" IsEnabled="False" />
             </ComboBox>
@@ -169,16 +243,12 @@
             <!-- ============ Limits ============ -->
             <TextBlock Text="{DynamicResource S.Settings.HistoryLimits}" Style="{StaticResource Section}" />
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="70" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="70" />
-                </Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="80" /></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <TextBlock Text="{DynamicResource S.Settings.History.Messages}" Style="{StaticResource FieldLabel}" />
-                <TextBox x:Name="MaxMessagesBox" Grid.Column="1" Style="{StaticResource Input}" Margin="0,4,6,0" />
-                <TextBlock Text="{DynamicResource S.Settings.History.Days}" Grid.Column="2" Style="{StaticResource FieldLabel}" />
-                <TextBox x:Name="MaxDaysBox" Grid.Column="3" Style="{StaticResource Input}" Margin="0,4,0,0" />
+                <TextBox x:Name="MaxMessagesBox" Grid.Column="1" Style="{StaticResource Input}" Margin="0,4,0,0" />
+                <TextBlock Text="{DynamicResource S.Settings.History.Days}" Grid.Row="1" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="MaxDaysBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource Input}" Margin="0,4,0,0" />
             </Grid>
 
             <Button x:Name="SaveButton" Style="{StaticResource SetAccent}" Content="Save"

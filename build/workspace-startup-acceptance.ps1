@@ -11,12 +11,69 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Controls.Primitives;
+using OMNIX.Core.Settings;
+using System.IO;
 using OMNIX.Core.Ui;
 using OMNIX.Core.Localization;
 using OMNIX.Core.Theming;
 using OMNIX.Core.AiGateway;
 class WorkspaceStartupRegression {
     static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
+    static double Luminance(Color c) {
+        Func<byte,double> f = b => { double v=b/255.0; return v<=0.04045 ? v/12.92 : Math.Pow((v+0.055)/1.055,2.4); };
+        return 0.2126*f(c.R)+0.7152*f(c.G)+0.0722*f(c.B);
+    }
+    static void Contrast(Brush foreground, Brush background) {
+        var f=foreground as SolidColorBrush; var b=background as SolidColorBrush;
+        Check(f!=null && b!=null, "Theme brush missing");
+        double a=Luminance(f.Color), z=Luminance(b.Color);
+        Check((Math.Max(a,z)+0.05)/(Math.Min(a,z)+0.05)>=4.5, "Settings text contrast below 4.5:1: "+f.Color+" / "+b.Color);
+    }
+    static void Snapshot(FrameworkElement element, string name) {
+        int width=(int)Math.Ceiling(element.ActualWidth), height=(int)Math.Ceiling(element.ActualHeight);
+        Check(width>0 && height>0,"Screenshot layout missing");
+        var bitmap=new RenderTargetBitmap(width,height,96,96,PixelFormats.Pbgra32); bitmap.Render(element);
+        var encoder=new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        Directory.CreateDirectory("build/artifact");
+        using(var stream=File.Create("build/artifact/"+name+".png")) encoder.Save(stream);
+    }
+    static void SettingsRegression(WorkspaceView view) {
+        view.ShowSettingsTab();
+        foreach (ThemeMode mode in new[]{ThemeMode.Dark,ThemeMode.Light}) {
+            SettingsManager.Instance.Settings.Theme=mode; ThemeManager.Instance.ApplyTo(view);
+            var settings=view.Settings;
+            var provider=(ComboBox)settings.FindName("ProviderCombo");
+            provider.ItemsSource=new ProviderRegistry().All;
+            provider.DisplayMemberPath="Info.DisplayName";
+            provider.SelectedIndex=0;
+            var model=(ComboBox)settings.FindName("ModelCombo");
+            model.ItemsSource=new[]{"model-one", "model-two-with-a-long-name"};
+            foreach (string name in new[]{"ProviderCombo","ModelCombo","ThemeCombo","LanguageCombo"}) {
+                var combo=(ComboBox)settings.FindName(name); combo.ApplyTemplate();
+                combo.IsDropDownOpen=true; combo.UpdateLayout();
+                var frame=new DispatcherFrame();
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>frame.Continue=false));
+                Dispatcher.PushFrame(frame);
+                var border=(Border)combo.Template.FindName("DropDownBorder",combo);
+                Contrast(combo.Foreground,combo.Background); Contrast(combo.Foreground,border.Background);
+                var item=(ComboBoxItem)combo.ItemContainerGenerator.ContainerFromIndex(0);
+                Check(item!=null,"Drop-down item missing"); item.ApplyTemplate(); item.UpdateLayout();
+                Contrast(item.Foreground,item.Background);
+                if(name=="ProviderCombo") Snapshot(border,"settings-dropdown-"+mode);
+                combo.IsDropDownOpen=false;
+            }
+            model.Text="manually-entered-model"; model.ApplyTemplate();
+            var editor=(TextBox)model.Template.FindName("PART_EditableTextBox",model);
+            Check(editor!=null && editor.Visibility==Visibility.Visible,"Editable model input missing");
+            editor.Text="edited-model-id";
+            Check(model.Text=="edited-model-id","Editable model binding failed");
+            Contrast(editor.Foreground,editor.Background);
+            view.UpdateLayout(); Snapshot(view,"settings-"+mode);
+        }
+    }
     [STAThread] static int Main() {
         try {
             // Cold lookup on a background thread before there is a WPF Application or view.
@@ -51,6 +108,7 @@ class WorkspaceStartupRegression {
                     ((RadioButton)view.FindName("TabChat")).IsChecked = true;
                     Check(chat.Visibility == Visibility.Visible && about.Visibility == Visibility.Collapsed, "Chat navigation failed");
                     Check(view.FindResource("S.Tab.Chat") as string == "Chat", "UI localization failed after background lookup");
+                    if(i==0) SettingsRegression(view);
                     var frame = new DispatcherFrame();
                     Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
                     Dispatcher.PushFrame(frame);
@@ -91,6 +149,6 @@ Get-Content $stdout | Write-Host
 Get-Content $stderr | Write-Host
 if ($p.ExitCode -ne 0) { throw "WPF startup regression failed ($($p.ExitCode))." }
 New-Item -ItemType Directory -Force (Join-Path $root 'build\artifact') | Out-Null
-@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
+@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
 
 Remove-Item -LiteralPath $file,$exe,$stdout,$stderr -Force

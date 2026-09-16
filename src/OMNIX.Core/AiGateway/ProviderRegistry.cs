@@ -46,9 +46,9 @@ namespace OMNIX.Core.AiGateway
                 "https://ai.google.dev/gemini-api/docs",
                 "https://ai.google.dev/gemini-api/docs/get-started",
                 "https://aistudio.google.com/apikey",
-                "gemini-3.8-flash",
+                "",
                 ProviderAccessProfile.FreeTierAvailable,
-                "Gemini Developer API currently lists free-tier input/output for Gemini 3.8 Flash. Free-tier quotas, regional availability and data-use terms still apply.",
+                "Gemini model access, regional availability, quotas and billing depend on your Google project. Load the live model catalog and select an available model.",
                 "https://ai.google.dev/gemini-api/docs/pricing",
                 AccessVerifiedDate);
 

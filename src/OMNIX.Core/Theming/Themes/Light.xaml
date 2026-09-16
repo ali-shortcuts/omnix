@@ -5,7 +5,7 @@
     <Color x:Key="C.Surface">#F5F6FA</Color>
     <Color x:Key="C.Foreground">#1B1D23</Color>
     <Color x:Key="C.ForegroundDim">#6B7080</Color>
-    <Color x:Key="C.Accent">#7C5CFF</Color>
+    <Color x:Key="C.Accent">#6B46E5</Color>
     <Color x:Key="C.AccentForeground">#FFFFFF</Color>
     <Color x:Key="C.Border">#E1E4EC</Color>
     <Color x:Key="C.BubbleUser">#7C5CFF</Color>
