@@ -12,36 +12,24 @@ namespace OMNIX.Core.Localization
     /// </summary>
     public static class Strings
     {
+        // WPF dictionaries belong to the thread that loads them. Background diagnostics must
+        // not publish an empty/foreign-thread dictionary to the Office UI.
+        [ThreadStatic]
         private static ResourceDictionary _dict;
-        private static readonly object Gate = new object();
 
         public static ResourceDictionary Dictionary
         {
             get
             {
-                if (_dict == null)
+                if (_dict != null) return _dict;
+                // Relative component URI lets WPF initialize its pack URI support itself,
+                // including first use from a non-WPF Office/background entry point.
+                var loaded = new ResourceDictionary
                 {
-                    lock (Gate)
-                    {
-                        if (_dict == null)
-                        {
-                            _dict = new ResourceDictionary();
-                            string lang = Settings.SettingsManager.Instance.Settings.UiLanguage ?? "en";
-                            // Future: switch on lang to load Strings.fa.xaml (RTL ready).
-                            string uri = "pack://application:,,,/OMNIX.Core;component/Localization/Strings.xaml";
-                            try
-                            {
-                                var loaded = new ResourceDictionary { Source = new Uri(uri) };
-                                _dict = loaded;
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Error("ui", "Failed to load Strings.xaml", ex);
-                            }
-                        }
-                    }
-                }
-                return _dict;
+                    Source = new Uri("/OMNIX.Core;component/Localization/Strings.xaml", UriKind.Relative)
+                };
+                _dict = loaded; // Cache only after successful load; a failure can be retried.
+                return loaded;
             }
         }
 

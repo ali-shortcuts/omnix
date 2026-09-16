@@ -20,6 +20,7 @@ namespace OMNIX.Core.AiGateway
 
         private readonly List<IProviderAdapter> _providers;
         private readonly Dictionary<string, bool> _localAvailability;
+        private readonly Dictionary<string, string> _localModelHints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public ProviderRegistry()
         {
@@ -202,19 +203,20 @@ namespace OMNIX.Core.AiGateway
 
         public string GetLocalModelHint(string id)
         {
-            try
+            lock (_localModelHints)
             {
-                var p = Get(id);
-                if (p == null) return null;
-                var t = p.ListModelsAsync(CancellationToken_None);
-                t.Wait(3000);
-                if (t.Status == TaskStatus.RanToCompletion && t.Result != null && t.Result.Count > 0)
-                    return t.Result[0];
+                string hint;
+                return _localModelHints.TryGetValue(id, out hint) ? hint : null;
             }
-            catch { }
-            return null;
         }
 
-        private static CancellationToken CancellationToken_None { get { return CancellationToken.None; } }
+        public async Task RefreshLocalModelHintAsync(string id, CancellationToken ct)
+        {
+            var provider = Get(id);
+            if (provider == null) return;
+            var models = await provider.ListModelsAsync(ct).ConfigureAwait(false);
+            lock (_localModelHints)
+                _localModelHints[id] = models != null && models.Count > 0 ? models[0] : null;
+        }
     }
 }

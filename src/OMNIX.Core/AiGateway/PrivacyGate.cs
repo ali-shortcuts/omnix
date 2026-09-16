@@ -100,6 +100,8 @@ namespace OMNIX.Core.AiGateway
                     p.Configure(creds);
                     using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
                     {
+                        await _registry.RefreshLocalModelHintAsync(p.Info.Id, cts.Token).ConfigureAwait(false);
+                        p.Configure(BuildCredentials(p.Info.Id));
                         bool ok = await p.TestConnectionAsync(cts.Token).ConfigureAwait(false);
                         _registry.SetLocalAvailability(p.Info.Id, ok);
                         if (_health != null)
