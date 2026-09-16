@@ -35,3 +35,7 @@ Microsoft documents that Office assumes an interactive desktop and that noninter
 - [Microsoft Windows Sandbox](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/)
 - [GitHub self-hosted runners](https://docs.github.com/actions/hosting-your-own-runners)
 - [Microsoft runtime download, version 10.0.60910](https://www.microsoft.com/en-us/download/details.aspx?id=105522)
+
+## Installer interaction during acceptance
+
+Full Office E2E now opens the installer interactively by default. Keep the VM desktop unlocked and review the normal installer and Microsoft VSTO deployment prompts. Rejection or deployment failure must fail acceptance; do not import a root certificate or weaken Trust Center to obtain a PASS. The direct `tools/full-office-e2e.ps1 -SilentInstall` option is only for a candidate already trusted by that test profile. The canonical bound workflow retains interactive installation. A required restart remains a separate operator-controlled phase.

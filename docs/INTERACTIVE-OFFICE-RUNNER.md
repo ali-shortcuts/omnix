@@ -223,3 +223,7 @@ OMNIX is production-approved only when the complete evidence set for one exact f
 ```
 
 Anything else remains non-production.
+
+## Installer interaction during acceptance
+
+Full Office E2E now opens the installer interactively by default. Keep the VM desktop unlocked and review the normal installer and Microsoft VSTO deployment prompts. Rejection or deployment failure must fail acceptance; do not import a root certificate or weaken Trust Center to obtain a PASS. The direct `tools/full-office-e2e.ps1 -SilentInstall` option is only for a candidate already trusted by that test profile. The canonical bound workflow retains interactive installation. A required restart remains a separate operator-controlled phase.
