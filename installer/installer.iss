@@ -205,11 +205,27 @@ begin
   if RegKeyExists(HKCU, Key) then RegDeleteKeyIncludingSubkeys(HKCU, Key);
 end;
 
-procedure RemoveAddinRegistry();
+procedure RemoveOwnedRegistration(const Key, Host: String);
+var Actual, Expected: String;
 begin
-  RemoveHostRegistration('Excel');
-  RemoveHostRegistration('Word');
-  RemoveHostRegistration('PowerPoint');
+  Expected := ExpandConstant('{app}') + '\OMNIX.' + Host + '.vsto';
+  StringChange(Expected, '\', '/');
+  Expected := 'file:///' + Expected + '|vstolocal';
+  if RegQueryStringValue(HKCU, Key, 'Manifest', Actual) then
+    if CompareText(Actual, Expected) = 0 then RegDeleteKeyIncludingSubkeys(HKCU, Key)
+    else InstallLog('UNINSTALL: preserved registration owned by another installation: ' + Key);
+end;
+
+procedure RemoveAddinRegistry();
+var I: Integer; Host: String;
+begin
+  for I := 0 to 2 do
+  begin
+    if I = 0 then Host := 'Excel' else if I = 1 then Host := 'Word' else Host := 'PowerPoint';
+    RemoveOwnedRegistration(Format(CanonicalRegAddinsFmt, [Host]), Host);
+    RemoveOwnedRegistration(Format(LegacyRegAddinsFmt, ['16.0', Host]), Host);
+    RemoveOwnedRegistration(Format(LegacyRegAddinsFmt, ['15.0', Host]), Host);
+  end;
 end;
 
 function ManifestUri(const Host: String): String;
@@ -387,10 +403,9 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  I, ResultCode, CertClassResult: Integer;
+  I, ResultCode: Integer;
   AllOk: Boolean;
-  CertPath, CertClassifier, CertMarker, DevThumbprintText: String;
-  DevThumbprintRaw: AnsiString;
+  CertPath, CertClassifier: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -405,44 +420,28 @@ begin
   begin
     AllOk := True;
 
-    CertPath := ExpandConstant('{app}') + '\OMNIX.cer';
-    CertClassifier := ExpandConstant('{app}') + '\classify-dev-cert.ps1';
-    CertMarker := ExpandConstant('{app}') + '\dev-cert-thumbprint.txt';
-    DeleteFile(CertMarker);
-
-    if FileExists(CertPath) and FileExists(CertClassifier) then
-    begin
-      Exec('powershell.exe', '-NoProfile -File "' + CertClassifier + '" -CertPath "' + CertPath + '" -OutputPath "' + CertMarker + '"', '', SW_HIDE, ewWaitUntilTerminated, CertClassResult);
-      if CertClassResult = 0 then
-      begin
-        DevThumbprintRaw := '';
-        if LoadStringFromFile(CertMarker, DevThumbprintRaw) then DevThumbprintText := Trim(DevThumbprintRaw) else DevThumbprintText := '';
-        if DevThumbprintText = '' then AllOk := False
-        else
-        begin
-          Exec(ExpandConstant('{cmd}'), '/C certutil -f -user -addstore ' + TrustedPubStore + ' "' + CertPath + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-          if ResultCode <> 0 then AllOk := False;
-          Exec(ExpandConstant('{cmd}'), '/C certutil -f -user -addstore ' + RootStore + ' "' + CertPath + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-          if ResultCode <> 0 then AllOk := False;
-        end;
-      end
-      else if CertClassResult = 2 then
-        InstallLog('CA/non-self-signed publisher certificate detected: no OMNIX trust-store modification performed.')
-      else
-        AllOk := False;
-    end
-    else
-    begin
-      InstallLog('CERTIFICATE_ERROR: OMNIX.cer/classifier missing.');
-      AllOk := False;
-    end;
-
+    CertPath := ExpandConstant('{app}') + '\install-vsto-trust.ps1';
+    CertClassifier := '-NoProfile -File "' + CertPath + '" -InstallDir "' + ExpandConstant('{app}') + '" -HostNames "';
     for I := 0 to HostList.Count - 1 do
-      if not RegisterHost(HostList[I]) then AllOk := False;
+    begin
+      if I > 0 then CertClassifier := CertClassifier + ',';
+      CertClassifier := CertClassifier + HostList[I];
+    end;
+    CertClassifier := CertClassifier + '"';
+    if WizardSilent then CertClassifier := CertClassifier + ' -Silent';
+    if not FileExists(CertPath) then AllOk := False
+    else if not Exec('powershell.exe', CertClassifier, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then AllOk := False
+    else if ResultCode <> 0 then AllOk := False;
+    { No addstore operation: Microsoft VSTOInstaller owns normal deployment trust. }
 
-    if not RunRegistrationMaintenance() then AllOk := False;
+    if AllOk then
+      for I := 0 to HostList.Count - 1 do
+        if not RegisterHost(HostList[I]) then AllOk := False;
 
-    MaintenanceTaskInstalled := InstallMaintenanceTask();
+    if AllOk then
+      if not RunRegistrationMaintenance() then AllOk := False;
+
+    if AllOk then MaintenanceTaskInstalled := InstallMaintenanceTask();
     if not MaintenanceTaskInstalled then
       InstallLog('MAINTENANCE_WARNING: optional current-user re-scan task was not installed.');
 
@@ -474,6 +473,12 @@ begin
       SuppressibleMsgBox('OMNIX was installed and registered for: ' + HostsSummary() + #13#10#13#10 +
              'Open Excel, Word or PowerPoint. The OMNIX Ribbon tab should load automatically.', mbInformation, MB_OK, IDOK);
   end;
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := not (IsProcessRunning('excel.exe') or IsProcessRunning('winword.exe') or IsProcessRunning('powerpnt.exe'));
+  if not Result then SuppressibleMsgBox('Close Excel, Word and PowerPoint before uninstalling OMNIX.', mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

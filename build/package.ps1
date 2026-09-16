@@ -106,6 +106,7 @@ if (Test-Path -LiteralPath $cert -PathType Leaf) {
 
 $requiredScripts = @(
     'post-install-verify.ps1',
+    'install-vsto-trust.ps1',
     'classify-dev-cert.ps1',
     'office-registration-maintenance.ps1',
     'install-maintenance-task.ps1'
