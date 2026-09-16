@@ -60,7 +60,7 @@ namespace OMNIX.Core.Settings
             s.PreferredLocalProviderId = "ollama";
             s.Models = new Dictionary<string, string>
             {
-                { "gemini", "gemini-3.8-flash" },
+                { "gemini", "" },
                 { "groq", "openai/gpt-oss-120b" },
                 { "openrouter", "openrouter/free" },
                 { "mistral", "mistral-small-latest" },
