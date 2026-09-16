@@ -30,7 +30,7 @@ class WorkspaceStartupRegression {
         var f=foreground as SolidColorBrush; var b=background as SolidColorBrush;
         Check(f!=null && b!=null, "Theme brush missing");
         double a=Luminance(f.Color), z=Luminance(b.Color);
-        Check((Math.Max(a,z)+0.05)/(Math.Min(a,z)+0.05)>=4.5, "Settings text contrast below 4.5:1");
+        Check((Math.Max(a,z)+0.05)/(Math.Min(a,z)+0.05)>=4.5, "Settings text contrast below 4.5:1: "+f.Color+" / "+b.Color);
     }
     static void Snapshot(FrameworkElement element, string name) {
         int width=(int)Math.Ceiling(element.ActualWidth), height=(int)Math.Ceiling(element.ActualHeight);
@@ -149,6 +149,6 @@ Get-Content $stdout | Write-Host
 Get-Content $stderr | Write-Host
 if ($p.ExitCode -ne 0) { throw "WPF startup regression failed ($($p.ExitCode))." }
 New-Item -ItemType Directory -Force (Join-Path $root 'build\artifact') | Out-Null
-@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
+@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
 
 Remove-Item -LiteralPath $file,$exe,$stdout,$stderr -Force
