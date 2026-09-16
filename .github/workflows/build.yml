@@ -165,6 +165,10 @@ jobs:
         shell: powershell
         run: ./build/runtime-policy-acceptance.ps1
 
+      - name: Verify setup helper execution under Restricted policy
+        shell: powershell
+        run: ./build/setup-powershell-acceptance.ps1
+
       - name: Compile development single-exe installer
         shell: pwsh
         run: |
@@ -321,6 +325,7 @@ jobs:
             build/artifact/history-storage-acceptance.json
             build/artifact/office-registration-maintenance-audit.json
             build/artifact/runtime-policy-acceptance.json
+            build/artifact/setup-powershell-acceptance.json
             build/artifact/inno-compile.log
             build/defender-report.txt
             build/logs/*.binlog
