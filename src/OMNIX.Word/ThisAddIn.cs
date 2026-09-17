@@ -19,7 +19,7 @@ namespace OMNIX.Word
             Logger.Startup("=== OMNIX.Word ThisAddIn: static ctor reached (pid " + System.Diagnostics.Process.GetCurrentProcess().Id + ") ===");
         }
 
-        internal WordHostAdapter Adapter { get; private set; }
+        internal IHostAdapter Adapter { get; private set; }
         internal WordTaskPaneService Panes { get; private set; }
 
         internal static AiGateway SharedGateway;
@@ -38,7 +38,7 @@ namespace OMNIX.Word
                 return;
             }
 
-            Adapter = new WordHostAdapter(Application,
+            Adapter = new SearchableWordHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
 
             EnsureSharedServices();

@@ -21,7 +21,7 @@ namespace OMNIX.Excel
             Logger.Startup("=== OMNIX.Excel ThisAddIn: static ctor reached (pid " + System.Diagnostics.Process.GetCurrentProcess().Id + ") ===");
         }
 
-        internal ExcelHostAdapter Adapter { get; private set; }
+        internal IHostAdapter Adapter { get; private set; }
         internal ExcelTaskPaneService Panes { get; private set; }
 
         internal static AiGateway SharedGateway;
@@ -40,7 +40,7 @@ namespace OMNIX.Excel
                 return;
             }
 
-            Adapter = new ExcelHostAdapter(Application,
+            Adapter = new SearchableExcelHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxCells,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
 

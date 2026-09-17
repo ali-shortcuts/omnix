@@ -409,7 +409,8 @@ namespace OMNIX.Core.AiGateway
             sb.AppendLine("```omnix_tool");
             sb.AppendLine("{\"tool\":\"<name>\",\"args\":{...}}");
             sb.AppendLine("```");
-            sb.AppendLine("Read-only tools: read_selection, read_document, read_presentation, capture_chart_as_image, capture_slide_as_image, capture_current_view_as_image.");
+            sb.AppendLine("Read-only tools: read_selection, read_document, read_presentation, search_document {query,max_results}, capture_chart_as_image, capture_slide_as_image, capture_current_view_as_image.");
+            sb.AppendLine("For a targeted lookup that may be outside the initial compact context — for example a person/name, account/value, contract clause, phrase, formula, slide topic or other specific term — request search_document with a concise literal query before guessing. Use max_results only when useful; OMNIX bounds it. Search results are locations/snippets, not proof that the whole file was inspected.");
             sb.AppendLine("For a broader textual/structural question, request read_document (or read_presentation in PowerPoint) instead of guessing from the initial compact context.");
             sb.AppendLine("For visual inspection, request capture_current_view_as_image for the current Excel/Word/PowerPoint view/selection, capture_chart_as_image for an Excel chart, or capture_slide_as_image for a PowerPoint slide. OMNIX attaches the captured PNG to the next tool-result turn automatically when the active model supports Vision.");
             sb.AppendLine("A visual capture is bounded: analyze only what is visible in that captured image and do not claim to see other pages, sheets, cells or slides.");

@@ -93,6 +93,10 @@ jobs:
         shell: pwsh
         run: ./build/conversation-continuity-contract-gates.ps1
 
+      - name: Enforce Office search retrieval contract
+        shell: pwsh
+        run: ./build/search-retrieval-contract-gates.ps1
+
       - name: Enforce provider diagnostic privacy contract
         shell: pwsh
         run: ./build/diagnostic-redaction-contract-gates.ps1

@@ -35,4 +35,15 @@ namespace OMNIX.Core.Context
         WritePreview PrepareWrite(string toolName, string argumentsJson);
         void ApplyWrite(string toolName, string argumentsJson);
     }
+
+    /// <summary>
+    /// Optional targeted retrieval capability. Search-aware decorators implement this interface
+    /// without changing the existing host adapter mutation/read contracts. Implementations must use
+    /// bounded/native host search where available and must not materialize an entire Office file just
+    /// to answer one query.
+    /// </summary>
+    public interface IDocumentSearchProvider
+    {
+        string SearchDocument(string query, int maxResults, int maxChars);
+    }
 }

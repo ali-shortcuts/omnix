@@ -16,6 +16,7 @@ namespace OMNIX.Core.Tools
         public const string ReadSelection = "read_selection";
         public const string ReadDocument = "read_document";
         public const string ReadPresentation = "read_presentation";
+        public const string SearchDocument = "search_document";
         public const string CaptureChartAsImage = "capture_chart_as_image";
         public const string CaptureSlideAsImage = "capture_slide_as_image";
         public const string CaptureCurrentViewAsImage = "capture_current_view_as_image";
@@ -30,7 +31,7 @@ namespace OMNIX.Core.Tools
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
-            ReadSelection, ReadDocument, ReadPresentation,
+            ReadSelection, ReadDocument, ReadPresentation, SearchDocument,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage,
             WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
         };

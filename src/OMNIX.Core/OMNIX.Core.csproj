@@ -103,6 +103,7 @@
     <Compile Include="Context\ExcelHostAdapter.cs" />
     <Compile Include="Context\IHostAdapter.cs" />
     <Compile Include="Context\PowerPointHostAdapter.cs" />
+    <Compile Include="Context\SearchableOfficeAdapters.cs" />
     <Compile Include="Context\VstoHostItemResolver.cs" />
     <Compile Include="Context\WordHostAdapter.cs" />
     <Compile Include="ContextLimiter\ContextLimiter.cs" />

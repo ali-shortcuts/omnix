@@ -19,7 +19,7 @@ namespace OMNIX.PowerPoint
             Logger.Startup("=== OMNIX.PowerPoint ThisAddIn: static ctor reached (pid " + System.Diagnostics.Process.GetCurrentProcess().Id + ") ===");
         }
 
-        internal PowerPointHostAdapter Adapter { get; private set; }
+        internal IHostAdapter Adapter { get; private set; }
         internal PowerPointTaskPaneService Panes { get; private set; }
 
         internal static AiGateway SharedGateway;
@@ -38,7 +38,7 @@ namespace OMNIX.PowerPoint
                 return;
             }
 
-            Adapter = new PowerPointHostAdapter(Application,
+            Adapter = new SearchablePowerPointHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
 
             EnsureSharedServices();
