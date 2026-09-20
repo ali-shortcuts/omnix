@@ -73,6 +73,7 @@ namespace OMNIX.Core.AiGateway
             var history = new List<ChatTurn>(request.History ?? new List<ChatTurn>());
             ChatTurn current = request.UserTurn;
 
+            var approvedProviders = new HashSet<string>(StringComparer.Ordinal);
             ChatResponse final = null;
             for (int round = 0; round < 8; round++)
             {
@@ -103,7 +104,13 @@ namespace OMNIX.Core.AiGateway
                 }
 
                 // This MUST remain before provider.SendAsync. Privacy acceptance locks this ordering.
-                await _privacy.EnsureAllowedAsync(provider).ConfigureAwait(true);
+                string approvalIdentity = provider.Info.Id + "|" + SettingsManager.Instance.Settings.Privacy + "|" +
+                    ((provider.Info.Id == "custom" || provider.Info.Id == "agentrouter") ? SettingsManager.Instance.Settings.EndpointConfig(provider.Info.Id).BaseUrl : "");
+                if (!approvedProviders.Contains(approvalIdentity))
+                {
+                    await _privacy.EnsureAllowedAsync(provider).ConfigureAwait(true);
+                    approvedProviders.Add(approvalIdentity);
+                }
 
                 ChatResponse response;
                 var visibleDelta = new ToolProtocolDeltaFilter(onDelta);
@@ -407,6 +414,7 @@ namespace OMNIX.Core.AiGateway
             sb.AppendLine("There are at most eight provider turns per request. Scope large jobs into explicit stages and report unfinished work. Model support for image input is required for Vision; a text-only connection test does not verify Vision.");
             sb.AppendLine("You help the user with THEIR document: answering questions, drafting text, writing Excel formulas, summarizing data, and reviewing slides.");
             sb.AppendLine("Use structured Office context first. Never claim you inspected an entire workbook/document/presentation unless the supplied context or a read tool actually contains the relevant scope.");
+            sb.AppendLine("Keep previews short: describe the intended change and show sample data. Do not expose tool names, protocol, internal limits or token counts. Ask only for missing decisions that materially change the result; propose sensible defaults for a small demonstration. Count rows and cells accurately. Do not claim a change is irreversible unless the tool explicitly says so.");
             sb.AppendLine("Formatting: answer in clean Markdown. Put Excel formulas in backticks (e.g. `=SUM(A1:A10)`). Keep answers compact — the panel is 360px wide.");
             sb.AppendLine();
             sb.AppendLine("AVAILABLE TOOLS (whitelist — nothing else exists):");

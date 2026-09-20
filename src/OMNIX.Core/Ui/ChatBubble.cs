@@ -44,12 +44,12 @@ namespace OMNIX.Core.Ui
 
             if (IsUser)
             {
-                Background = Find("B.BubbleUser");
+                SetResourceReference(BackgroundProperty, "B.BubbleUser");
                 HorizontalAlignment = HorizontalAlignment.Right;
             }
             else
             {
-                Background = Find("B.BubbleAi");
+                SetResourceReference(BackgroundProperty, "B.BubbleAi");
                 HorizontalAlignment = HorizontalAlignment.Left;
             }
 
@@ -66,6 +66,7 @@ namespace OMNIX.Core.Ui
                 _header, IsUser ? "OMNIX.UserMessageHeader" : "OMNIX.AssistantMessageHeader");
             _header.Text = (IsUser ? Localization.Strings.T("S.Chat.You") : Localization.Strings.T("S.Chat.Assistant"))
                            + "  ·  " + turn.TimestampUtc.ToLocalTime().ToString("HH:mm");
+            _header.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
             stack.Children.Add(_header);
 
             _doc = new FlowDocument
@@ -75,8 +76,8 @@ namespace OMNIX.Core.Ui
             };
             _doc.SetCurrentValue(System.Windows.Documents.TextElement.FontFamilyProperty, new FontFamily("Segoe UI"));
             _doc.SetCurrentValue(System.Windows.Documents.TextElement.FontSizeProperty, 12.0);
-            _doc.SetCurrentValue(TextElement.ForegroundProperty,
-                IsUser ? Find("B.BubbleUserForeground") : Find("B.BubbleAiForeground"));
+            _doc.SetResourceReference(TextElement.ForegroundProperty,
+                IsUser ? "B.BubbleUserForeground" : "B.BubbleAiForeground");
 
             _body = new RichTextBox
             {
@@ -112,13 +113,20 @@ namespace OMNIX.Core.Ui
                 _image, IsUser ? "OMNIX.UserMessageImage" : "OMNIX.AssistantMessageImage");
             stack.Children.Add(_image);
 
+            _body.SetResourceReference(Control.ForegroundProperty,
+                IsUser ? "B.BubbleUserForeground" : "B.BubbleAiForeground");
             Child = stack;
 
             if (turn.HasImages && turn.Images[0].PngBytes != null)
                 SetImage(turn.Images[0].PngBytes);
 
-            AppendMarkdown(turn.Text ?? "");
+            _rawText = turn.Text ?? "";
+            Loaded += (sender, args) => { AppendMarkdown(_rawText); Theming.ThemeManager.Instance.ThemeChanged += RefreshTheme; };
+            Unloaded += (sender, args) => Theming.ThemeManager.Instance.ThemeChanged -= RefreshTheme;
+            AppendMarkdown(_rawText);
         }
+
+        private void RefreshTheme() { Dispatcher.BeginInvoke(new Action(() => AppendMarkdown(_rawText))); }
 
         public void SetImage(byte[] png)
         {
@@ -157,6 +165,8 @@ namespace OMNIX.Core.Ui
 
         private void AppendMarkdown(string text)
         {
+            _doc.FlowDirection = System.Text.RegularExpressions.Regex.IsMatch(text ?? "", @"^[^A-Za-z\u0600-\u06ff]*[\u0600-\u06ff]")
+                ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
             MarkdownRenderer.Render(_doc, text);
         }
 

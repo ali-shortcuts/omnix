@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using OMNIX.Core.AiGateway;
@@ -44,7 +45,7 @@ namespace OMNIX.Core.Ui
             "cloud.cerebras.ai",
             "ollama.com",
             "docs.ollama.com",
-            "lmstudio.ai"
+            "lmstudio.ai", "cloud.sambanova.ai", "docs.sambanova.ai", "build.nvidia.com", "docs.api.nvidia.com"
         };
 
         public SettingsView()
@@ -90,9 +91,10 @@ namespace OMNIX.Core.Ui
                 ApiKeyBox.Clear();
                 if (selected == null) KeyStateText.Visibility = Visibility.Collapsed;
 
-                var cp = settings.CustomProvider;
+                var cp = settings.EndpointConfig(_displayedProviderId);
                 CustomNameBox.Text = cp != null ? cp.Name : "";
                 CustomBaseUrlBox.Text = cp != null ? cp.BaseUrl : "";
+                CustomApiTypeCombo.SelectedIndex = cp != null && cp.ApiType == "Anthropic" ? 1 : 0;
 
                 PrivacyLocalOnly.IsChecked = settings.Privacy == PrivacyMode.LocalOnly;
                 PrivacyCloudAllowed.IsChecked = settings.Privacy == PrivacyMode.CloudAllowed;
@@ -129,7 +131,8 @@ namespace OMNIX.Core.Ui
         {
             if (info == null) return;
 
-            CustomProviderSection.Visibility = info.Id == "custom" ? Visibility.Visible : Visibility.Collapsed;
+            CustomProviderSection.Visibility = (info.Id == "custom" || info.Id == "agentrouter") ? Visibility.Visible : Visibility.Collapsed;
+            LocalProviderSection.Visibility = info.Id == "ollama" || info.Id == "lmstudio" ? Visibility.Visible : Visibility.Collapsed;
             bool needsKey = info.RequiresApiKey;
             bool hasKey = needsKey && SettingsManager.Instance.HasApiKey(info.Id);
 
@@ -155,42 +158,12 @@ namespace OMNIX.Core.Ui
             bool hasOfficialLink = GetApiKeyButton.Visibility == Visibility.Visible ||
                                    ProviderDocsButton.Visibility == Visibility.Visible;
             ProviderLinksPanel.Visibility = hasOfficialLink ? Visibility.Visible : Visibility.Collapsed;
-            ProviderLinkNote.Visibility = hasOfficialLink ? Visibility.Visible : Visibility.Collapsed;
+            ProviderLinkNote.Visibility = Visibility.Collapsed;
         }
 
         private static string BuildProviderSummary(ProviderInfo info)
         {
-            if (info == null) return string.Empty;
-            string access;
-            switch (info.AccessProfile)
-            {
-                case ProviderAccessProfile.LocalNoCost:
-                    access = "Access: Local / no cloud token charge.";
-                    break;
-                case ProviderAccessProfile.FreeTierAvailable:
-                    access = "Access: Free tier/mode currently available; provider limits apply.";
-                    break;
-                case ProviderAccessProfile.FreeModelsAvailable:
-                    access = "Access: Free models currently available; provider capacity/limits can change.";
-                    break;
-                case ProviderAccessProfile.FreeCreditsAvailable:
-                    access = "Access: Limited free credits/trial currently available; not unlimited free usage.";
-                    break;
-                case ProviderAccessProfile.CustomEndpoint:
-                    access = "Access: Defined by your custom endpoint.";
-                    break;
-                case ProviderAccessProfile.AccountDependent:
-                    access = "Access: Account/plan dependent; see the provider's current terms.";
-                    break;
-                default:
-                    access = "Access: Unknown until provider/account details are checked.";
-                    break;
-            }
-
-            string text = access;
-            if (!string.IsNullOrWhiteSpace(info.AccessNotes)) text += "\n" + info.AccessNotes;
-            if (!string.IsNullOrWhiteSpace(info.Notes)) text += "\n" + info.Notes;
-            return text;
+            return string.Empty;
         }
 
         private void OnProviderChanged(object sender, SelectionChangedEventArgs e)
@@ -203,6 +176,12 @@ namespace OMNIX.Core.Ui
             SaveDisplayedProviderFields();
             var settings = SettingsManager.Instance.Settings;
             _displayedProviderId = info.Id;
+            var endpoint = settings.EndpointConfig(info.Id);
+            if (endpoint != null) {
+                CustomNameBox.Text = endpoint.Name;
+                CustomBaseUrlBox.Text = endpoint.BaseUrl;
+                CustomApiTypeCombo.SelectedIndex = endpoint.ApiType == "Anthropic" ? 1 : 0;
+            }
             settings.SelectedProviderId = info.Id;
             string model;
             ModelCombo.ItemsSource = null;
@@ -218,10 +197,12 @@ namespace OMNIX.Core.Ui
         {
             LoadModelsButton.IsEnabled = !busy;
             TestButton.IsEnabled = !busy;
+            CancelTestButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             ModelCombo.IsEnabled = !busy;
             ApiKeyBox.IsEnabled = !busy;
             CustomNameBox.IsEnabled = !busy;
             CustomBaseUrlBox.IsEnabled = !busy;
+            CustomApiTypeCombo.IsEnabled = !busy;
         }
 
         private void CancelProviderOperation()
@@ -296,6 +277,12 @@ namespace OMNIX.Core.Ui
 
         private async void OnLoadModels(object sender, RoutedEventArgs e)
         {
+            try { await OfficeUi.RunAsync(Dispatcher, OnLoadModelsCore); }
+            catch (Exception ex) { Logger.Error("ui", "Settings operation failed", ex); }
+        }
+
+        private async Task OnLoadModelsCore()
+        {
             var gateway = Gateway;
             if (gateway == null) return;
             var info = ProviderCombo.SelectedItem as ProviderInfo;
@@ -323,17 +310,12 @@ namespace OMNIX.Core.Ui
                 ModelCombo.Text = current; // Preserve a manually entered model ID.
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
-                TestResultText.Text = models.Count + " models loaded.";
-                if (info.AccessProfile == ProviderAccessProfile.FreeModelsAvailable)
-                    TestResultText.Text += " Free options are prioritized at the top of the list.";
-                if (string.Equals(info.Id, "huggingface", StringComparison.OrdinalIgnoreCase))
-                    TestResultText.Text += " Any currently-free provider routes reported by the live Hugging Face catalog are prioritized.";
-                TestResultText.Text += "\nSelect a model, then use Test Connection. Model discovery does not verify Vision.";
+                TestResultText.Text = models.Count + " models found. Select one or enter an ID.";
             }
             catch (OmnixException ex)
             {
                 if (ReferenceEquals(_providerOperation, operation))
-                    TestResultText.Text = Errors.ErrorPresenter.Format(ex) + "\nYou can still enter a model ID and test it directly.";
+                    TestResultText.Text = ex.Message + " Enter a model ID manually.";
             }
             catch (OperationCanceledException)
             {
@@ -354,6 +336,12 @@ namespace OMNIX.Core.Ui
 
         private async void OnTestConnection(object sender, RoutedEventArgs e)
         {
+            try { await OfficeUi.RunAsync(Dispatcher, OnTestConnectionCore); }
+            catch (Exception ex) { Logger.Error("ui", "Settings operation failed", ex); }
+        }
+
+        private async Task OnTestConnectionCore()
+        {
             var gateway = Gateway;
             if (gateway == null) return;
             var info = ProviderCombo.SelectedItem as ProviderInfo;
@@ -369,20 +357,15 @@ namespace OMNIX.Core.Ui
             {
                 var adapter = new ProviderRegistry().Get(info.Id);
                 if (adapter == null) return;
-                var privacy = new PrivacyGate
-                {
-                    CloudConfirmationCallback = providerName => System.Threading.Tasks.Task.FromResult(OmnixDialogs.ConfirmCloudSend(
-                        providerName, "Synthetic connection test only. No Office document content is sent."))
-                };
-                await ProviderDiagnostics.TestModelAsync(adapter, gateway.Router.BuildCredentials(info.Id), privacy, operation.Token);
+                await ProviderDiagnostics.TestSyntheticModelAsync(adapter, gateway.Router.BuildCredentials(info.Id), operation.Token);
                 if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = "The selected model returned a text response.\nVision was not tested.\n" + BuildProviderSummary(adapter.Info);
+                TestResultText.Text = "Connected. Text response received. Vision not tested.";
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
             }
             catch (OmnixException ex)
             {
                 if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = Errors.ErrorPresenter.Format(ex);
+                TestResultText.Text = ex.Message;
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
             }
             catch (OperationCanceledException)
@@ -406,6 +389,12 @@ namespace OMNIX.Core.Ui
 
         private async void OnProbeLocal(object sender, RoutedEventArgs e)
         {
+            try { await OfficeUi.RunAsync(Dispatcher, OnProbeLocalCore); }
+            catch (Exception ex) { Logger.Error("ui", "Settings operation failed", ex); }
+        }
+
+        private async Task OnProbeLocalCore()
+        {
             var gateway = Gateway;
             if (gateway == null) return;
             ProbeButton.IsEnabled = false;
@@ -424,6 +413,7 @@ namespace OMNIX.Core.Ui
             settings.Theme = (ThemeMode)ThemeCombo.SelectedIndex;
             SettingsManager.Instance.Save();
             Theming.ThemeManager.Instance.ApplyTo(ParentWorkspace());
+            Theming.ThemeManager.Instance.NotifySettingsChanged();
         }
 
         private System.Windows.FrameworkElement ParentWorkspace()
@@ -432,6 +422,8 @@ namespace OMNIX.Core.Ui
             while (d != null && !(d is WorkspaceView)) d = System.Windows.Media.VisualTreeHelper.GetParent(d);
             return d as WorkspaceView;
         }
+
+        private void OnCancelTest(object sender, RoutedEventArgs e) { CancelProviderOperation(); TestResultText.Text = "Cancelled."; }
 
         private void OnSave(object sender, RoutedEventArgs e)
         {
@@ -458,14 +450,16 @@ namespace OMNIX.Core.Ui
             if (string.IsNullOrEmpty(_displayedProviderId)) return;
             var settings = SettingsManager.Instance.Settings;
 
-            if (settings.CustomProvider != null)
+            var customConfig = settings.EndpointConfig(_displayedProviderId);
+            if (customConfig != null && (_displayedProviderId == "custom" || _displayedProviderId == "agentrouter"))
             {
-                if (!string.Equals(settings.CustomProvider.BaseUrl, CustomBaseUrlBox.Text.Trim(), StringComparison.Ordinal) ||
-                    (_displayedProviderId == "custom" && !string.Equals(settings.CustomProvider.Model, ModelCombo.Text.Trim(), StringComparison.Ordinal)))
-                    settings.CustomProvider.SupportsVision = null;
-                settings.CustomProvider.Name = CustomNameBox.Text.Trim();
-                settings.CustomProvider.BaseUrl = CustomBaseUrlBox.Text.Trim();
-                if (_displayedProviderId == "custom") settings.CustomProvider.Model = ModelCombo.Text.Trim();
+                customConfig.ApiType = CustomApiTypeCombo.SelectedIndex == 1 ? "Anthropic" : "OpenAI";
+                if (!string.Equals(customConfig.BaseUrl, CustomBaseUrlBox.Text.Trim(), StringComparison.Ordinal) ||
+                    (!string.Equals(customConfig.Model, ModelCombo.Text.Trim(), StringComparison.Ordinal)))
+                    customConfig.SupportsVision = null;
+                customConfig.Name = CustomNameBox.Text.Trim();
+                customConfig.BaseUrl = CustomBaseUrlBox.Text.Trim();
+                customConfig.Model = ModelCombo.Text.Trim();
             }
 
             settings.Models[_displayedProviderId] = ModelCombo.Text.Trim();
@@ -477,6 +471,7 @@ namespace OMNIX.Core.Ui
         private void SaveGeneralFields()
         {
             var settings = SettingsManager.Instance.Settings;
+            var previousPrivacy = settings.Privacy;
 
             if (PrivacyLocalOnly.IsChecked == true) settings.Privacy = PrivacyMode.LocalOnly;
             else if (PrivacyCloudAllowed.IsChecked == true) settings.Privacy = PrivacyMode.CloudAllowed;
@@ -489,7 +484,7 @@ namespace OMNIX.Core.Ui
             settings.HistoryMaxAgeDays = int.TryParse(MaxDaysBox.Text, out days) ? Math.Max(1, days) : 30;
 
             var gateway = Gateway;
-            if (gateway != null) gateway.Privacy.ResetSession();
+            if (gateway != null && previousPrivacy != settings.Privacy) gateway.Privacy.ResetSession();
         }
     }
 }

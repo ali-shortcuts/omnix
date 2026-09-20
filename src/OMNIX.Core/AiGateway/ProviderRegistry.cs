@@ -26,18 +26,28 @@ namespace OMNIX.Core.AiGateway
         {
             _providers = new List<IProviderAdapter>
             {
-                new OllamaAdapter(),
-                new LmStudioAdapter(),
+                new CustomOpenAiCompatibleAdapter(),
+                new CustomOpenAiCompatibleAdapter("agentrouter"),
+                new CompatiblePresetAdapter("sambanova", "SambaNova", "https://api.sambanova.ai/v1", "https://docs.sambanova.ai/docs/en/get-started/api-keys-urls", "https://cloud.sambanova.ai/"),
+                new CompatiblePresetAdapter("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "https://docs.api.nvidia.com/nim/reference/llm-apis", "https://build.nvidia.com/"),
                 new GeminiAdapter(),
                 new GroqAdapter(),
                 new OpenRouterAdapter(),
                 new MistralAdapter(),
                 new HuggingFaceAdapter(),
                 new CerebrasAdapter(),
-                new CustomOpenAiCompatibleAdapter()
+                new OllamaAdapter(),
+                new LmStudioAdapter()
             };
             _localAvailability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             ApplyOfficialMetadata();
+            var names = new Dictionary<string, string> {
+                { "custom", "Custom" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
+                { "openrouter", "OpenRouter" }, { "mistral", "Mistral" },
+                { "huggingface", "Hugging Face" }, { "cerebras", "Cerebras" },
+                { "ollama", "Ollama" }, { "lmstudio", "LM Studio" }
+            };
+            foreach (var provider in _providers) provider.Info.DisplayName = names[provider.Info.Id];
         }
 
         private void ApplyOfficialMetadata()

@@ -36,6 +36,7 @@ namespace OMNIX.Core.AiGateway
 
     public sealed class ProviderInfo
     {
+        public override string ToString() { return DisplayName ?? Id ?? ""; }
         public string Id { get; set; }
         public string DisplayName { get; set; }
         public ProviderKind Kind { get; set; }

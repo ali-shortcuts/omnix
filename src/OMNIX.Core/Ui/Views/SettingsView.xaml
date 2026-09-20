@@ -119,7 +119,7 @@
                             <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="None">
                                 <Border x:Name="DropDownBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                         MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
-                                    <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                    <ScrollViewer CanContentScroll="True" MaxHeight="250" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Auto">
                                         <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
                                     </ScrollViewer>
                                 </Border>
@@ -158,6 +158,26 @@
                       DisplayMemberPath="DisplayName" Margin="0,4,0,0"
                       SelectionChanged="OnProviderChanged" />
 
+            <!-- ============ Custom provider ============ -->
+            <StackPanel x:Name="CustomProviderSection" Visibility="Collapsed">
+            <TextBlock Text="Custom" Style="{StaticResource Section}" TextWrapping="Wrap" />
+            <TextBlock Text="{DynamicResource S.Settings.CustomName}" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="CustomNameBox" Style="{StaticResource Input}" />
+            <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="CustomApiTypeCombo" Style="{StaticResource Combo}" SelectedIndex="0">
+                <ComboBoxItem Content="OpenAI-compatible" />
+                <ComboBoxItem Content="Anthropic-compatible" />
+            </ComboBox>
+            <TextBlock Text="{DynamicResource S.Settings.CustomBaseUrl}" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="CustomBaseUrlBox" Style="{StaticResource Input}" />
+
+            </StackPanel>
+
+            <TextBlock x:Name="ApiKeyLabel" Text="{DynamicResource S.Settings.ApiKey}" Style="{StaticResource FieldLabel}" />
+            <PasswordBox x:Name="ApiKeyBox" Style="{StaticResource Secret}" />
+            <TextBlock x:Name="KeyStateText" Text="{DynamicResource S.Settings.ApiKeyStored}"
+                       FontSize="10" Foreground="{DynamicResource B.Success}" Margin="0,2,0,0" />
+
             <TextBlock Text="{DynamicResource S.Settings.Model}" Style="{StaticResource FieldLabel}" />
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -166,13 +186,8 @@
                 </Grid.ColumnDefinitions>
                 <ComboBox x:Name="ModelCombo" Style="{StaticResource Combo}" IsEditable="True" />
                 <Button x:Name="LoadModelsButton" Grid.Column="1" Style="{StaticResource SetButton}"
-                        Content="{DynamicResource S.Settings.LoadModels}" Margin="4,0,0,0" Click="OnLoadModels" />
+                        Content="Detect models" Margin="4,0,0,0" Click="OnLoadModels" />
             </Grid>
-
-            <TextBlock x:Name="ApiKeyLabel" Text="{DynamicResource S.Settings.ApiKey}" Style="{StaticResource FieldLabel}" />
-            <PasswordBox x:Name="ApiKeyBox" Style="{StaticResource Secret}" />
-            <TextBlock x:Name="KeyStateText" Text="{DynamicResource S.Settings.ApiKeyStored}"
-                       FontSize="10" Foreground="{DynamicResource B.Success}" Margin="0,2,0,0" />
 
             <StackPanel x:Name="ProviderLinksPanel" Orientation="Horizontal" Margin="0,7,0,0">
                 <Button x:Name="GetApiKeyButton" Style="{StaticResource SetButton}"
@@ -188,11 +203,13 @@
                 <Button x:Name="TestButton" Style="{StaticResource SetAccent}"
                         ToolTip="Sends a short test message to the selected model. Provider usage limits and charges may apply."
                         Content="{DynamicResource S.Settings.TestConnection}" Click="OnTestConnection" />
+                <Button x:Name="CancelTestButton" Content="Stop" Click="OnCancelTest" Style="{StaticResource SetButton}" Visibility="Collapsed" Margin="6,0,0,0" />
             </StackPanel>
             <TextBlock x:Name="TestResultText" FontSize="11" Margin="0,6,0,0"
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
 
             <!-- ============ Local AI ============ -->
+            <StackPanel x:Name="LocalProviderSection" Visibility="Collapsed">
             <TextBlock Text="{DynamicResource S.Settings.LocalStatus}" Style="{StaticResource Section}" />
             <Grid Margin="0,2,0,0">
                 <Grid.ColumnDefinitions>
@@ -208,24 +225,15 @@
                       FontSize="11.5" Margin="0,6,0,0"
                       Content="{DynamicResource S.Settings.PreferLocal}" />
 
-            <!-- ============ Custom provider ============ -->
-            <StackPanel x:Name="CustomProviderSection" Visibility="Collapsed">
-            <TextBlock Text="{DynamicResource S.Settings.CustomProvider}" Style="{StaticResource Section}" TextWrapping="Wrap" />
-            <TextBlock Text="{DynamicResource S.Settings.CustomName}" Style="{StaticResource FieldLabel}" />
-            <TextBox x:Name="CustomNameBox" Style="{StaticResource Input}" />
-            <TextBlock Text="{DynamicResource S.Settings.CustomBaseUrl}" Style="{StaticResource FieldLabel}" />
-            <TextBox x:Name="CustomBaseUrlBox" Style="{StaticResource Input}" />
-
             </StackPanel>
-
             <!-- ============ Privacy ============ -->
-            <TextBlock Text="{DynamicResource S.Settings.PrivacyMode}" Style="{StaticResource Section}" />
+            <TextBlock Text="Privacy" Style="{StaticResource Section}" />
             <RadioButton x:Name="PrivacyLocalOnly" Style="{StaticResource Radio}"
-                         GroupName="OmnixPrivacy" Content="{DynamicResource S.Settings.Privacy.LocalOnly}" />
+                         GroupName="OmnixPrivacy" Content="Local only" />
             <RadioButton x:Name="PrivacyCloudAllowed" Style="{StaticResource Radio}"
                          GroupName="OmnixPrivacy" Content="{DynamicResource S.Settings.Privacy.CloudAllowed}" />
             <RadioButton x:Name="PrivacyAsk" Style="{StaticResource Radio}"
-                         GroupName="OmnixPrivacy" Content="{DynamicResource S.Settings.Privacy.AskBeforeSending}" />
+                         GroupName="OmnixPrivacy" Content="Ask before sending" />
 
             <!-- ============ Appearance ============ -->
             <TextBlock Text="{DynamicResource S.Settings.Appearance}" Style="{StaticResource Section}" />

@@ -13,7 +13,12 @@ namespace OMNIX.Core.Tools
         {
             if (string.IsNullOrEmpty(json) || json.Length > 32000)
                 throw new ArgumentException("Table plan must be nonempty and at most 32000 characters.");
-            var plan = JObject.Parse(json);
+            JObject plan;
+            using (var reader = new Newtonsoft.Json.JsonTextReader(new System.IO.StringReader(json)))
+            {
+                reader.DateParseHandling = Newtonsoft.Json.DateParseHandling.None;
+                plan = JObject.Load(reader);
+            }
             string name = (string)plan["sheet"];
             if (string.IsNullOrWhiteSpace(name) || name.Length > 31 || name.IndexOfAny(new[] { ':', '\\', '/', '?', '*', '[', ']' }) >= 0
                 || name.StartsWith("'") || name.EndsWith("'") || name.Any(char.IsControl))

@@ -93,6 +93,15 @@ public static class ProviderDiagnosticsHarness
             try { Probe(adapter, gate, CancellationToken.None); checks["DeclinedConsentBlocksSend"] = false; }
             catch (OmnixException ex) { checks["DeclinedConsentBlocksSend"] = ex.Code == ErrorCode.PRIVACY_BLOCKED && adapter.Sends == 0; }
 
+            adapter = new DiagnosticAdapter(ProviderKind.Cloud);
+            ProviderDiagnostics.TestSyntheticModelAsync(adapter, new ProviderCredentials { Model="manual-model" }, CancellationToken.None).GetAwaiter().GetResult();
+            checks["ExplicitDiagnosticDoesNotAskDocumentConsent"] = adapter.Sends == 1 && adapter.Request.History == null && adapter.Request.SystemPrompt == null && !adapter.Request.HasImages && adapter.Request.UserTurn.Text == "Reply with OK.";
+            settings.Privacy = PrivacyMode.LocalOnly;
+            adapter = new DiagnosticAdapter(ProviderKind.Cloud);
+            try { ProviderDiagnostics.TestSyntheticModelAsync(adapter, new ProviderCredentials(), CancellationToken.None).GetAwaiter().GetResult(); checks["ExplicitDiagnosticRespectsLocalOnly"]=false; }
+            catch(OmnixException ex) { checks["ExplicitDiagnosticRespectsLocalOnly"]=ex.Code==ErrorCode.PRIVACY_BLOCKED && adapter.Sends==0; }
+            settings.Privacy = PrivacyMode.AskBeforeSending;
+
             using (var cts = new CancellationTokenSource())
             {
                 cts.Cancel();

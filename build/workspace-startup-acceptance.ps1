@@ -7,6 +7,13 @@ $wpf = Join-Path $framework 'WPF'
 $source = @'
 using System;
 using System.Diagnostics;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Windows.Documents;
+using OMNIX.Core.AiGateway.Http;
+using OMNIX.Core.AiGateway.Adapters;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -51,9 +58,10 @@ class WorkspaceStartupRegression {
             SettingsManager.Instance.Settings.Theme=mode; ThemeManager.Instance.ApplyTo(view);
             var settings=view.Settings;
             var provider=(ComboBox)settings.FindName("ProviderCombo");
-            provider.ItemsSource=new ProviderRegistry().All;
-            provider.DisplayMemberPath="Info.DisplayName";
+            provider.ItemsSource=new ProviderRegistry().All.Select(p=>p.Info).ToList();
+            provider.DisplayMemberPath="DisplayName";
             provider.SelectedIndex=0;
+            Check(provider.SelectedItem.ToString()=="Custom","Provider selected label must display its name");
             var model=(ComboBox)settings.FindName("ModelCombo");
             model.ItemsSource=new[]{"model-one", "model-two-with-a-long-name"};
             foreach (string name in new[]{"ProviderCombo","ModelCombo","ThemeCombo","LanguageCombo"}) {
@@ -132,6 +140,67 @@ class WorkspaceStartupRegression {
             Check(background.IsCompleted && background.GetAwaiter().GetResult(),"Background callback missed pane dispatcher");
         }
     }
+    static void TransportRegression() {
+        // Actual HTTP transport against a loopback fixture: no provider account or secret.
+        foreach(bool anthropic in new[]{false,true}) foreach(bool streaming in new[]{false,true}) {
+            var portPicker=new TcpListener(IPAddress.Loopback,0); portPicker.Start();
+            int port=((IPEndPoint)portPicker.LocalEndpoint).Port; portPicker.Stop();
+            using(var server=new HttpListener()) using(var timeout=new CancellationTokenSource(5000)) {
+                string origin="http://127.0.0.1:"+port; server.Prefixes.Add(origin+"/"); server.Start();
+                var serving=Task.Run(async ()=> {
+                    var context=await server.GetContextAsync();
+                    Check(context.Request.Url.AbsolutePath==(anthropic?"/v1/messages":"/v1/chat/completions"),"Wrong chat route");
+                    Check(anthropic ? context.Request.Headers["x-api-key"]=="fixture-key" && context.Request.Headers["anthropic-version"]=="2023-06-01" : context.Request.Headers["Authorization"]=="Bearer fixture-key","Wrong provider auth headers");
+                    using(var reader=new StreamReader(context.Request.InputStream)) {
+                        string body=await reader.ReadToEndAsync(); Check(body.Contains("fixture-model") && body.Contains("Reply with OK."),"Diagnostic lost model or text");
+                    }
+                    string reply=streaming
+                        ? (anthropic ? "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n" : "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n\n")
+                        : (anthropic ? "{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}" : "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}");
+                    byte[] bytes=Encoding.UTF8.GetBytes(reply); context.Response.ContentType=streaming?"text/event-stream":"application/json";
+                    context.Response.ContentLength64=bytes.Length; await context.Response.OutputStream.WriteAsync(bytes,0,bytes.Length); context.Response.Close();
+                });
+                var client=new OpenAiCompatibleClient(origin+"/v1","Fixture",null,anthropic);
+                var text=new StringBuilder(); Action<string> delta=streaming ? new Action<string>(x=>text.Append(x)) : null;
+                var answer=client.SendAsync(new ChatRequest{UserTurn=new ChatTurn{Role=ChatRole.User,Text="Reply with OK."}},"fixture-key","fixture-model",delta,timeout.Token).GetAwaiter().GetResult();
+                serving.GetAwaiter().GetResult();
+                Check(answer.Text=="OK" && (!streaming || text.ToString()=="OK"),"Protocol response parsing failed");
+            }
+        }
+    }
+    static void AsyncContextRegression() {
+        SynchronizationContext.SetSynchronizationContext(null);
+        int owner=Thread.CurrentThread.ManagedThreadId;
+        var bubble=new ChatBubble(new ChatTurn {Role=ChatRole.Assistant,Text="test"});
+        var runner=typeof(WorkspaceController).Assembly.GetType("OMNIX.Core.Ui.OfficeUi").GetMethod("RunAsync",BindingFlags.Public|BindingFlags.Static);
+        foreach(bool fail in new[]{false,true}) {
+            bool caught=false,finalized=false;
+            Func<Task> work=async ()=> {
+                try {
+                    await Task.Delay(25);
+                    Check(Thread.CurrentThread.ManagedThreadId==owner,"Async continuation left Office dispatcher");
+                    bubble.ReplaceText("پاسخ **خوانا**");
+                    if(fail) throw new InvalidOperationException("synthetic failure");
+                } catch(InvalidOperationException) { caught=true; bubble.ReplaceText("Handled"); }
+                finally { Check(Thread.CurrentThread.ManagedThreadId==owner,"Finally left Office dispatcher"); finalized=true; }
+            };
+            var task=(Task)runner.Invoke(null,new object[]{Dispatcher.CurrentDispatcher,work});
+            var timer=Stopwatch.StartNew();
+            while(!task.IsCompleted && timer.ElapsedMilliseconds<5000) {
+                var frame=new DispatcherFrame();
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>frame.Continue=false));
+                Dispatcher.PushFrame(frame);
+            }
+            Check(task.IsCompleted,"Dispatcher async test timed out"); task.GetAwaiter().GetResult();
+            Check(finalized && caught==fail,"Async error recovery failed");
+        }
+        Check(CustomOpenAiCompatibleAdapter.NormalizeBaseUrl("https://example.org")=="https://example.org/v1","Root URL routing failed");
+        Check(CustomOpenAiCompatibleAdapter.NormalizeBaseUrl("https://example.org/proxy/v1/messages")=="https://example.org/proxy/v1","Anthropic path normalization failed");
+        var anthropic=new OpenAiCompatibleClient("https://example.org/v1","Fixture",null,true);
+        anthropic.SetModel("fixture-model");
+        string payload=anthropic.BuildPayload(new ChatRequest{SystemPrompt="Office context",UserTurn=new ChatTurn{Role=ChatRole.User,Text="Hello"}},false);
+        Check(payload.Contains("\"max_tokens\":4096") && payload.Contains("\"system\":\"Office context\"") && !payload.Contains("\"role\":\"system\""),"Anthropic payload format invalid");
+    }
     [STAThread] static int Main() {
         try {
             // Cold lookup on a background thread before there is a WPF Application or view.
@@ -144,6 +213,8 @@ class WorkspaceStartupRegression {
             Check(thread.Join(10000), "Cold localization timed out");
             if (backgroundError != null) throw backgroundError;
             Check(Application.Current == null, "Test must model Office without a WPF Application");
+            TransportRegression();
+            AsyncContextRegression();
             CapabilityRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
@@ -209,6 +280,6 @@ Get-Content $stdout | Write-Host
 Get-Content $stderr | Write-Host
 if ($p.ExitCode -ne 0) { throw "WPF startup regression failed ($($p.ExitCode))." }
 New-Item -ItemType Directory -Force (Join-Path $root 'build\artifact') | Out-Null
-@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;OfficePaneDispatcherPass=$true;NavigationScopeIsolationPass=$true;TablePlanValidationPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
+@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;OfficePaneDispatcherPass=$true;AsyncContinuationWithoutSynchronizationContextPass=$true;AnthropicPayloadPass=$true;OpenAIAndAnthropicHttpAndStreamingPass=$true;NavigationScopeIsolationPass=$true;TablePlanValidationPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
 
 Remove-Item -LiteralPath $file,$exe,$stdout,$stderr -Force

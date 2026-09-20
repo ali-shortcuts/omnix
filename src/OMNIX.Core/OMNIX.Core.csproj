@@ -127,6 +127,8 @@
     <Compile Include="Ui\Views\SettingsView.xaml.cs"><DependentUpon>SettingsView.xaml</DependentUpon></Compile>
     <Compile Include="Ui\Views\WorkspaceView.xaml.cs"><DependentUpon>WorkspaceView.xaml</DependentUpon></Compile>
     <Compile Include="Ui\WorkspaceController.cs" />
+    <Compile Include="Ui\OfficeUi.cs" />
+    <Compile Include="AiGateway\Adapters\CompatiblePresetAdapter.cs" />
     <Compile Include="Util\Utils.cs" />
   </ItemGroup>
   <ItemGroup>

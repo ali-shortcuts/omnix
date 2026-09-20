@@ -193,6 +193,12 @@ namespace OMNIX.Core.Ui
 
         public async void SendMessage(string text, ImageAttachment image)
         {
+            try { await OfficeUi.RunAsync(View.Dispatcher, () => SendMessageCore(text, image)); }
+            catch (Exception ex) { Logger.Error("ui", "Chat dispatcher failed", ex); }
+        }
+
+        private async Task SendMessageCore(string text, ImageAttachment image)
+        {
             if (_disposed || _busy) return;
             text = (text ?? "").Trim();
             if (text.Length == 0 && image == null) return;

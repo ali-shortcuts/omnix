@@ -22,16 +22,17 @@ namespace OMNIX.Core.AiGateway.Adapters
         private ProviderCredentials _creds;
         private bool? _visionProbeResult;
         private string _baseUrl;
+        private bool _anthropic;
 
-        public CustomOpenAiCompatibleAdapter()
+        public CustomOpenAiCompatibleAdapter(string id = "custom")
         {
             Info = new ProviderInfo
             {
-                Id = "custom",
+                Id = id,
                 DisplayName = "Custom (OpenAI-compatible)",
                 Kind = ProviderKind.Cloud,
                 Vision = VisionSupport.DependsOnModel,
-                DefaultModel = "gpt-4o-mini",
+                DefaultModel = "",
                 RequiresApiKey = true,
                 AccessProfile = ProviderAccessProfile.CustomEndpoint,
                 AccessNotes = "API key is optional. Loopback http/https endpoints are local; every non-loopback custom endpoint must use HTTPS and is treated as cloud.",
@@ -45,9 +46,10 @@ namespace OMNIX.Core.AiGateway.Adapters
         {
             _creds = credentials ?? new ProviderCredentials();
             string url = _creds.BaseUrl;
-            var cp = SettingsManager.Instance.Settings.CustomProvider;
+            var cp = SettingsManager.Instance.Settings.EndpointConfig(Info.Id);
             if (string.IsNullOrWhiteSpace(url) && cp != null) url = cp.BaseUrl;
 
+            _anthropic = cp != null && cp.ApiType == "Anthropic";
             Uri parsed = new Uri(NormalizeBaseUrl(url));
             _baseUrl = parsed.AbsoluteUri.TrimEnd('/');
             Info.Kind = IsLoopbackEndpoint(parsed) ? ProviderKind.Local : ProviderKind.Cloud;
@@ -106,7 +108,7 @@ namespace OMNIX.Core.AiGateway.Adapters
                         _visionProbeResult = false;
                     }
 
-                    var cp = SettingsManager.Instance.Settings.CustomProvider;
+                    var cp = SettingsManager.Instance.Settings.EndpointConfig(Info.Id);
                     if (cp != null) cp.SupportsVision = _visionProbeResult;
                 }
                 return ok;
@@ -120,7 +122,7 @@ namespace OMNIX.Core.AiGateway.Adapters
         public bool SupportsVisionNow()
         {
             if (_visionProbeResult.HasValue) return _visionProbeResult.Value;
-            var cp = SettingsManager.Instance.Settings.CustomProvider;
+            var cp = SettingsManager.Instance.Settings.EndpointConfig(Info.Id);
             return cp != null && cp.SupportsVision == true;
         }
 
@@ -172,11 +174,12 @@ namespace OMNIX.Core.AiGateway.Adapters
         {
             var parsed = ValidateEndpoint(raw);
             string value = parsed.GetLeftPart(UriPartial.Path).TrimEnd('/');
-            foreach (string suffix in new[] { "/chat/completions", "/models" })
+            foreach (string suffix in new[] { "/chat/completions", "/messages", "/models" })
             {
                 if (value.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                     return value.Substring(0, value.Length - suffix.Length);
             }
+            if (parsed.AbsolutePath == "/") value += "/v1";
             return value;
         }
 
@@ -185,13 +188,13 @@ namespace OMNIX.Core.AiGateway.Adapters
             if (string.IsNullOrWhiteSpace(_baseUrl))
             {
                 string raw = _creds != null ? _creds.BaseUrl : null;
-                if (string.IsNullOrWhiteSpace(raw) && SettingsManager.Instance.Settings.CustomProvider != null)
-                    raw = SettingsManager.Instance.Settings.CustomProvider.BaseUrl;
+                if (string.IsNullOrWhiteSpace(raw) && SettingsManager.Instance.Settings.EndpointConfig(Info.Id) != null)
+                    raw = SettingsManager.Instance.Settings.EndpointConfig(Info.Id).BaseUrl;
                 Uri parsed = new Uri(NormalizeBaseUrl(raw));
                 _baseUrl = parsed.AbsoluteUri.TrimEnd('/');
                 Info.Kind = IsLoopbackEndpoint(parsed) ? ProviderKind.Local : ProviderKind.Cloud;
             }
-            return new OpenAiCompatibleClient(_baseUrl, "Custom Provider");
+            return new OpenAiCompatibleClient(_baseUrl, "Custom", null, _anthropic);
         }
     }
 }

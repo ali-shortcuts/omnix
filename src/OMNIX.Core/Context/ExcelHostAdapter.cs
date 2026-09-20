@@ -250,15 +250,36 @@ namespace OMNIX.Core.Context
                 {
                     captureRange.CopyPicture(Excel.XlPictureAppearance.xlScreen, Excel.XlCopyPictureFormat.xlPicture);
                     var wb = _app.ActiveWorkbook;
-                    Excel.Chart tempChart = (Excel.Chart)wb.Charts.Add();
+                    var originalSheet = _app.ActiveSheet;
+                    bool events = _app.EnableEvents;
+                    bool alerts = _app.DisplayAlerts;
+                    Excel.Chart tempChart = null;
                     try
                     {
+                        _app.EnableEvents = false;
+                        tempChart = (Excel.Chart)wb.Charts.Add();
                         tempChart.Paste();
                         tempChart.Export(path, "PNG", true);
                     }
                     finally
                     {
-                        tempChart.Delete();
+                        try
+                        {
+                            // Only our own temporary chart is deleted; never a user worksheet.
+                            _app.DisplayAlerts = false;
+                            if (tempChart != null) tempChart.Delete();
+                        }
+                        finally
+                        {
+                            try {
+                                var sheet = originalSheet as Excel.Worksheet;
+                                if (sheet != null) sheet.Activate();
+                                var chart = originalSheet as Excel.Chart;
+                                if (chart != null) chart.Activate();
+                                sel.Select();
+                            }
+                            finally { _app.DisplayAlerts = alerts; _app.EnableEvents = events; }
+                        }
                     }
                 });
             }
