@@ -253,6 +253,8 @@ namespace OMNIX.Core.AiGateway
                 case "mistral":
                 case "huggingface":
                 case "cerebras":
+                case "sambanova":
+                case "nvidia":
                     creds.ApiKey = SettingsManager.Instance.GetApiKey(providerId);
                     break;
                 case "ollama":
@@ -264,11 +266,12 @@ namespace OMNIX.Core.AiGateway
                     if (string.IsNullOrEmpty(creds.Model)) creds.Model = _registry.GetLocalModelHint("lmstudio");
                     break;
                 case "custom":
-                    var cp = settings.CustomProvider;
+                case "agentrouter":
+                    var cp = settings.EndpointConfig(providerId);
                     creds.BaseUrl = cp != null ? cp.BaseUrl : null;
                     if (string.IsNullOrWhiteSpace(creds.Model))
                         creds.Model = cp != null ? cp.Model : null;
-                    creds.ApiKey = SettingsManager.Instance.GetApiKey("custom");
+                    creds.ApiKey = SettingsManager.Instance.GetApiKey(providerId);
                     break;
             }
             return creds;

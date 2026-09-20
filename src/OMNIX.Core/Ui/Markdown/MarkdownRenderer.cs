@@ -18,6 +18,7 @@ namespace OMNIX.Core.Ui.Markdown
     /// </summary>
     public static class MarkdownRenderer
     {
+        [ThreadStatic] private static FlowDocument _renderDocument;
         private static readonly Regex InlineCode = new Regex("`([^`]+)`", RegexOptions.Compiled);
         private static readonly Regex Bold = new Regex(@"\*\*([^*]+)\*\*", RegexOptions.Compiled);
         private static readonly Regex Italic = new Regex(@"(?<!\*)\*([^*\n]+)\*(?!\*)", RegexOptions.Compiled);
@@ -25,6 +26,7 @@ namespace OMNIX.Core.Ui.Markdown
 
         public static void Render(FlowDocument doc, string markdown)
         {
+            _renderDocument = doc;
             doc.Blocks.Clear();
             if (string.IsNullOrEmpty(markdown)) return;
 
@@ -354,9 +356,7 @@ namespace OMNIX.Core.Ui.Markdown
         {
             try
             {
-                object v = System.Windows.Application.Current != null
-                    ? System.Windows.Application.Current.TryFindResource(key)
-                    : null;
+                object v = _renderDocument != null ? _renderDocument.TryFindResource(key) : null;
                 if (v is Brush) return (Brush)v;
             }
             catch { }

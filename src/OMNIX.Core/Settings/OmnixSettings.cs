@@ -20,6 +20,7 @@ namespace OMNIX.Core.Settings
 
     public sealed class CustomProviderConfig
     {
+        public string ApiType { get; set; } // OpenAI (default for existing settings) or Anthropic
         public string Name { get; set; }
         public string BaseUrl { get; set; }
         public string Model { get; set; }
@@ -42,6 +43,13 @@ namespace OMNIX.Core.Settings
         public string PreferredLocalProviderId { get; set; }
         public Dictionary<string, string> Models { get; set; }
         public CustomProviderConfig CustomProvider { get; set; }
+        public CustomProviderConfig AgentRouter { get; set; }
+        public CustomProviderConfig EndpointConfig(string id)
+        {
+            if (id != "agentrouter") return CustomProvider;
+            if (AgentRouter == null) AgentRouter = new CustomProviderConfig { Name = "Agent Router", BaseUrl = "https://agentrouter.org/v1", ApiType = "Anthropic", Model = "" };
+            return AgentRouter;
+        }
         public int HistoryMaxMessages { get; set; }
         public int HistoryMaxAgeDays { get; set; }
         public int ContextMaxCells { get; set; }
@@ -68,20 +76,20 @@ namespace OMNIX.Core.Settings
                 { "cerebras", "gpt-oss-120b" },
                 { "ollama", "" },
                 { "lmstudio", "" },
-                { "custom", "gpt-4o-mini" }
+                { "custom", "" }
             };
             s.CustomProvider = new CustomProviderConfig
             {
                 Name = "My Endpoint",
                 BaseUrl = "http://localhost:8080/v1",
-                Model = "gpt-4o-mini"
+                Model = ""
             };
             s.HistoryMaxMessages = 500;
             s.HistoryMaxAgeDays = 30;
             s.ContextMaxCells = 2000;
             s.ContextMaxChars = 6000;
             s.ContextMaxTokens = 3000;
-            s.PreferLocalWhenAvailable = true;
+            s.PreferLocalWhenAvailable = false;
             return s;
         }
     }

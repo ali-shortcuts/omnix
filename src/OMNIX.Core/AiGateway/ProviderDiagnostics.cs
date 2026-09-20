@@ -21,6 +21,23 @@ namespace OMNIX.Core.AiGateway
             await privacy.EnsureAllowedAsync(adapter).ConfigureAwait(true);
             ct.ThrowIfCancellationRequested();
 
+            await SendSyntheticAsync(adapter, ct).ConfigureAwait(false);
+        }
+
+        // Explicit Test Connection click authorizes ONLY this fixed, document-free request.
+        // Never reuse this path for chat, history, screenshots, or Office context.
+        public static async Task TestSyntheticModelAsync(IProviderAdapter adapter, ProviderCredentials credentials, CancellationToken ct)
+        {
+            if (adapter == null) throw new ArgumentNullException("adapter");
+            ct.ThrowIfCancellationRequested();
+            adapter.Configure(credentials);
+            if (adapter.Info.Kind == ProviderKind.Cloud && Settings.SettingsManager.Instance.Settings.Privacy == Settings.PrivacyMode.LocalOnly)
+                throw OmnixException.PrivacyBlocked("Local Only is enabled. Select a local provider or change Privacy.");
+            await SendSyntheticAsync(adapter, ct).ConfigureAwait(false);
+        }
+
+        private static async Task SendSyntheticAsync(IProviderAdapter adapter, CancellationToken ct)
+        {
             // Model catalogs are optional on compatible servers and do not prove inference access.
             var response = await adapter.SendAsync(new ChatRequest
             {

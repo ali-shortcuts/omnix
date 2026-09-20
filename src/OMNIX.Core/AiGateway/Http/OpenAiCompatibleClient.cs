@@ -28,15 +28,17 @@ namespace OMNIX.Core.AiGateway.Http
         private const int MaxModelCount = 5000;
 
         private readonly string _baseUrl;
+        private readonly bool _anthropic;
         private readonly string _providerDisplayName;
         private readonly Dictionary<string, string> _extraHeaders;
 
-        public OpenAiCompatibleClient(string baseUrl, string providerDisplayName, Dictionary<string, string> extraHeaders = null)
+        public OpenAiCompatibleClient(string baseUrl, string providerDisplayName, Dictionary<string, string> extraHeaders = null, bool anthropic = false)
         {
             if (string.IsNullOrWhiteSpace(baseUrl)) throw new ArgumentException("baseUrl is required", "baseUrl");
             _baseUrl = baseUrl.TrimEnd('/');
             _providerDisplayName = providerDisplayName;
             _extraHeaders = extraHeaders;
+            _anthropic = anthropic;
         }
 
         private static JObject BuildMessage(ChatTurn turn)
@@ -102,6 +104,28 @@ namespace OMNIX.Core.AiGateway.Http
                 { "messages", messages },
                 { "stream", stream }
             };
+            if (_anthropic)
+            {
+                payload["max_tokens"] = 4096;
+                if (!string.IsNullOrEmpty(request.SystemPrompt)) payload["system"] = request.SystemPrompt;
+                var converted = new JArray();
+                foreach (JObject message in messages)
+                {
+                    if ((string)message["role"] == "system") continue;
+                    var parts = message["content"] as JArray;
+                    if (parts != null)
+                        foreach (JObject part in parts)
+                            if ((string)part["type"] == "image_url")
+                            {
+                                string url = (string)part.SelectToken("image_url.url");
+                                part.Remove("image_url");
+                                part["type"] = "image";
+                                part["source"] = new JObject { { "type", "base64" }, { "media_type", "image/png" }, { "data", url.Substring(url.IndexOf(',') + 1) } };
+                            }
+                    converted.Add(message);
+                }
+                payload["messages"] = converted;
+            }
             return payload.ToString(Formatting.None);
         }
 
@@ -119,9 +143,14 @@ namespace OMNIX.Core.AiGateway.Http
             try
             {
                 using (var client = HttpClientFactory.Create())
-                using (var req = new HttpRequestMessage(HttpMethod.Post, _baseUrl + "/chat/completions"))
+                using (var req = new HttpRequestMessage(HttpMethod.Post, _baseUrl + (_anthropic ? "/messages" : "/chat/completions")))
                 {
-                    if (!string.IsNullOrEmpty(apiKey))
+                    if (_anthropic)
+                    {
+                        req.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+                        if (!string.IsNullOrEmpty(apiKey)) req.Headers.TryAddWithoutValidation("x-api-key", apiKey);
+                    }
+                    else if (!string.IsNullOrEmpty(apiKey))
                         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
                     if (_extraHeaders != null)
                         foreach (var kv in _extraHeaders)
@@ -144,7 +173,9 @@ namespace OMNIX.Core.AiGateway.Http
                             string full = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
                             var root = JObject.Parse(full);
                             model = (string)root.SelectToken("model") ?? model;
-                            string text = (string)root.SelectToken("choices[0].message.content") ?? "";
+                            string text = _anthropic
+                                ? string.Concat((root["content"] as JArray ?? new JArray()).Where(x => (string)x["type"] == "text").Select(x => (string)x["text"]))
+                                : (string)root.SelectToken("choices[0].message.content") ?? "";
                             if (text.Length > MaxAssistantChars)
                                 throw OmnixException.Provider(_providerDisplayName + " returned an over-sized assistant response.");
                             sb.Append(text);
@@ -160,7 +191,8 @@ namespace OMNIX.Core.AiGateway.Http
                                     try { chunk = JObject.Parse(data); }
                                     catch { continue; }
                                     model = (string)chunk.SelectToken("model") ?? model;
-                                    string delta = (string)chunk.SelectToken("choices[0].delta.content");
+                                    if ((string)chunk["type"] == "error") throw OmnixException.Provider("Provider streaming error; response body redacted.");
+                                    string delta = _anthropic ? (string)chunk.SelectToken("delta.text") : (string)chunk.SelectToken("choices[0].delta.content");
                                     if (!string.IsNullOrEmpty(delta))
                                     {
                                         if (sb.Length + delta.Length > MaxAssistantChars)
@@ -200,7 +232,12 @@ namespace OMNIX.Core.AiGateway.Http
                 using (var client = HttpClientFactory.Create(TimeSpan.FromSeconds(20)))
                 using (var req = new HttpRequestMessage(HttpMethod.Get, _baseUrl + "/models"))
                 {
-                    if (!string.IsNullOrEmpty(apiKey))
+                    if (_anthropic)
+                    {
+                        req.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+                        if (!string.IsNullOrEmpty(apiKey)) req.Headers.TryAddWithoutValidation("x-api-key", apiKey);
+                    }
+                    else if (!string.IsNullOrEmpty(apiKey))
                         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
                     if (_extraHeaders != null)
                         foreach (var kv in _extraHeaders)
