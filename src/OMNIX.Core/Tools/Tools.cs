@@ -13,6 +13,8 @@ namespace OMNIX.Core.Tools
     public static class ToolNames
     {
         // read-only
+        public const string ReadDocumentMap = "read_document_map";
+        public const string ReadDocumentSection = "read_document_section";
         public const string ReadSelection = "read_selection";
         public const string ReadDocument = "read_document";
         public const string ReadPresentation = "read_presentation";
@@ -21,6 +23,7 @@ namespace OMNIX.Core.Tools
         public const string CaptureCurrentViewAsImage = "capture_current_view_as_image";
 
         // write (user confirmation + native Office undo)
+        public const string CreateDataTable = "create_data_table";
         public const string WriteToCell = "write_to_cell";
         public const string InsertFormula = "insert_formula";
         public const string RewriteSelectedText = "rewrite_selected_text";
@@ -30,14 +33,14 @@ namespace OMNIX.Core.Tools
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
-            ReadSelection, ReadDocument, ReadPresentation,
+            ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage,
-            WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
         };
 
         private static readonly HashSet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal)
         {
-            WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
         };
 
         public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
@@ -95,6 +98,15 @@ namespace OMNIX.Core.Tools
             {
                 return new ToolArguments(new JObject());
             }
+        }
+
+        public int Integer(string key, int fallback, int minimum, int maximum)
+        {
+            int value;
+            if (!int.TryParse(Get(key, fallback.ToString(System.Globalization.CultureInfo.InvariantCulture)), out value)
+                || value < minimum || value > maximum)
+                throw new ArgumentException(key + " must be between " + minimum + " and " + maximum + ".");
+            return value;
         }
 
         public string Get(string key, string fallback)

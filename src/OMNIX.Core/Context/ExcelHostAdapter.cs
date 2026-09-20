@@ -18,7 +18,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -117,6 +117,66 @@ namespace OMNIX.Core.Context
             }
         }
 
+        public string ReadDocumentMap(int offset)
+        {
+            var wb = _app.ActiveWorkbook;
+            if (wb == null) throw new InvalidOperationException("No workbook is open.");
+            int total = wb.Worksheets.Count;
+            var sb = new StringBuilder();
+            sb.AppendLine("Workbook: " + wb.Name + "; worksheets=" + total + "; offset=" + offset);
+            int end = Math.Min(total, offset + 20);
+            for (int i = offset + 1; i <= end; i++)
+            {
+                var ws = (Excel.Worksheet)wb.Worksheets[i];
+                sb.AppendLine("Sheet=" + ws.Name + "; used=" + ws.UsedRange.Address[false, false]
+                    + "; visibility=" + ws.Visible + "; tables=" + ws.ListObjects.Count);
+            }
+            sb.AppendLine("nextOffset=" + (end < total ? end.ToString() : "none"));
+            sb.AppendLine("Map only: no cell contents read. Charts, VBA, connections and external files are not enumerated.");
+            return sb.ToString();
+        }
+
+        public string ReadDocumentSection(ToolArguments args)
+        {
+            var wb = _app.ActiveWorkbook;
+            if (wb == null) throw new InvalidOperationException("No workbook is open.");
+            string name = args.Get("sheet", "");
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Specify a sheet name from read_document_map.");
+            var ws = (Excel.Worksheet)wb.Worksheets[name];
+            int row = args.Integer("row", 1, 1, 1048576);
+            int col = args.Integer("column", 1, 1, 16384);
+            int rows = args.Integer("rows", 10, 1, 100);
+            int cols = args.Integer("columns", 8, 1, 32);
+            if (rows * cols > 256 || row + rows - 1 > 1048576 || col + cols - 1 > 16384)
+                throw new ArgumentException("Request at most 256 cells inside worksheet boundaries.");
+            // Resize BEFORE asking COM for arrays. No selection or active-sheet mutation.
+            var range = ((Excel.Range)ws.Cells[row, col]).Resize[rows, cols];
+            object values = range.Value2, formulas = range.Formula;
+            var va = values as Array; var fa = formulas as Array;
+            var sb = new StringBuilder();
+            sb.AppendLine("Sheet=" + ws.Name + "; requested=" + range.Address[false, false]);
+            int shown = 0;
+            for (int y = 1; y <= rows; y++)
+            {
+                for (int x = 1; x <= cols; x++)
+                {
+                    string v = Convert.ToString(va == null ? values : va.GetValue(y, x));
+                    string f = Convert.ToString(fa == null ? formulas : fa.GetValue(y, x));
+                    string cell = "row=" + (row+y-1) + ",column=" + (col+x-1)
+                        + "; value=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(v, 600))
+                        + "; formula=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(f, 600));
+                    if (sb.Length + cell.Length > 5500)
+                    {
+                        sb.AppendLine("PARTIAL: next unread row=" + (row+y-1) + ",column=" + (col+x-1) + "; request a smaller region.");
+                        return sb.ToString();
+                    }
+                    sb.AppendLine(cell); shown++;
+                }
+            }
+            sb.AppendLine("Cells returned=" + shown + "; each value/formula capped at 600 characters; other cells were NOT read.");
+            return sb.ToString();
+        }
+
         public byte[] CaptureChartAsImage(string chartName)
         {
             try
@@ -213,6 +273,8 @@ namespace OMNIX.Core.Context
         {
             switch (toolName)
             {
+                case ToolNames.CreateDataTable:
+                    return ExcelTableBuilder.Prepare(_app, argumentsJson);
                 case ToolNames.WriteToCell:
                 case ToolNames.InsertFormula:
                 case ToolNames.HighlightRange:
@@ -226,7 +288,8 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
-            ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
+            if (toolName == ToolNames.CreateDataTable) ExcelTableBuilder.Apply(_app, argumentsJson);
+            else ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
         }
 
         internal Excel.Application App { get { return _app; } }
@@ -474,6 +537,8 @@ namespace OMNIX.Core.Context
 
             switch (toolName)
             {
+                case ToolNames.CreateDataTable:
+                    return ExcelTableBuilder.Prepare(_app, argumentsJson);
                 case ToolNames.WriteToCell:
                     target.Value2 = args.Get("value", "");
                     break;

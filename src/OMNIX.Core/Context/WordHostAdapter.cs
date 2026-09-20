@@ -15,7 +15,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -107,6 +107,28 @@ namespace OMNIX.Core.Context
                 Logging.Logger.Error("startup-debug", "WordHostAdapter.ReadDocument failed", ex);
                 return "(unable to read document)";
             }
+        }
+
+        public string ReadDocumentMap(int offset)
+        {
+            var doc = _app.ActiveDocument;
+            var body = doc.Content;
+            return "Word main story: start=" + body.Start + "; endExclusive=" + body.End
+                + "; paragraphs=" + doc.Paragraphs.Count + "; tables=" + doc.Tables.Count
+                + "; comments=" + doc.Comments.Count
+                + ". Read using start/count. Headers, footers, text boxes, comments and footnotes are NOT included in main-story text.";
+        }
+
+        public string ReadDocumentSection(ToolArguments args)
+        {
+            var doc = _app.ActiveDocument;
+            var body = doc.Content;
+            int start = args.Integer("start", body.Start, body.Start, body.End);
+            int count = args.Integer("count", 4000, 1, 4000);
+            int end = Math.Min(body.End, start + count);
+            string text = doc.Range(start, end).Text;
+            return "Word main story [" + start + "," + end + "); nextStart="
+                + (end < body.End ? end.ToString() : "none") + "\n" + text;
         }
 
         public byte[] CaptureChartAsImage(string chartName) { return null; }
