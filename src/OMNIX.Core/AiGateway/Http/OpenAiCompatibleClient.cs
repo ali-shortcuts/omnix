@@ -229,56 +229,52 @@ namespace OMNIX.Core.AiGateway.Http
         {
             try
             {
+                var list = new List<string>();
+                var cursors = new HashSet<string>(StringComparer.Ordinal);
+                string cursor = null;
                 using (var client = HttpClientFactory.Create(TimeSpan.FromSeconds(20)))
-                using (var req = new HttpRequestMessage(HttpMethod.Get, _baseUrl + "/models"))
+                for (int page = 0; page < 50; page++)
                 {
-                    if (_anthropic)
+                    string url = _baseUrl + "/models" + (cursor == null ? "" : "?after_id=" + Uri.EscapeDataString(cursor));
+                    using (var req = new HttpRequestMessage(HttpMethod.Get, url))
                     {
-                        req.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
-                        if (!string.IsNullOrEmpty(apiKey)) req.Headers.TryAddWithoutValidation("x-api-key", apiKey);
-                    }
-                    else if (!string.IsNullOrEmpty(apiKey))
-                        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-                    if (_extraHeaders != null)
-                        foreach (var kv in _extraHeaders)
-                            req.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
-
-                    using (var response = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
-                    {
-                        if (!response.IsSuccessStatusCode)
+                        if (_anthropic)
                         {
-                            string err = await SseLineReader.ReadErrorBodyAsync(response, ct).ConfigureAwait(false);
-                            throw HttpStatusMapper.Map((int)response.StatusCode, err, _providerDisplayName);
+                            req.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+                            if (!string.IsNullOrEmpty(apiKey)) req.Headers.TryAddWithoutValidation("x-api-key", apiKey);
                         }
-                        string json = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
-                        var root = JObject.Parse(json);
-                        var list = new List<string>();
-                        foreach (var m in root["data"] ?? new JArray())
+                        else if (!string.IsNullOrEmpty(apiKey))
+                            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                        if (_extraHeaders != null)
+                            foreach (var kv in _extraHeaders) req.Headers.TryAddWithoutValidation(kv.Key, kv.Value);
+                        using (var response = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
                         {
-                            if (list.Count >= MaxModelCount) break;
-                            string id = (string)m["id"];
-                            if (!string.IsNullOrWhiteSpace(id)) list.Add(id);
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                string err = await SseLineReader.ReadErrorBodyAsync(response, ct).ConfigureAwait(false);
+                                throw HttpStatusMapper.Map((int)response.StatusCode, err, _providerDisplayName);
+                            }
+                            string json = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
+                            var root = JObject.Parse(json);
+                            foreach (var m in root["data"] ?? new JArray())
+                            {
+                                string id = (string)m["id"];
+                                if (!string.IsNullOrWhiteSpace(id) && !list.Contains(id)) list.Add(id);
+                                if (list.Count >= MaxModelCount) return list;
+                            }
+                            if (!_anthropic || (bool?)root["has_more"] != true) return list;
+                            cursor = (string)root["last_id"];
+                            if (string.IsNullOrEmpty(cursor) || !cursors.Add(cursor))
+                                throw OmnixException.Provider("Model catalog returned an invalid pagination cursor. Enter a model ID manually.");
                         }
-                        return list;
                     }
                 }
+                return list;
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (HttpRequestException ex)
-            {
-                throw OmnixException.Network(_providerDisplayName + " models: " + ex.Message);
-            }
-            catch (OmnixException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                throw OmnixException.Provider(_providerDisplayName + " model discovery failure: " + ex.Message);
-            }
+            catch (OperationCanceledException) { throw; }
+            catch (OmnixException) { throw; }
+            catch (HttpRequestException) { throw OmnixException.Network(_providerDisplayName + " model discovery could not reach the endpoint."); }
+            catch (Exception) { throw OmnixException.Provider(_providerDisplayName + " returned an invalid model catalog. Enter a model ID manually."); }
         }
 
         private static async Task<string> ReadBodyBoundedAsync(HttpContent content, int maxBytes, CancellationToken ct)

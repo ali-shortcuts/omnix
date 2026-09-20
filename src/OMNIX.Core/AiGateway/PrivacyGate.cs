@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -17,9 +18,9 @@ namespace OMNIX.Core.AiGateway
     public sealed class PrivacyGate
     {
         public Func<string, Task<Tuple<bool, bool>>> CloudConfirmationCallback { get; set; }
-        private volatile bool _sessionApproved;
+        private readonly HashSet<string> _sessionApproved = new HashSet<string>(StringComparer.Ordinal);
 
-        public void ResetSession() { _sessionApproved = false; }
+        public void ResetSession() { lock (_sessionApproved) _sessionApproved.Clear(); }
 
         public async Task EnsureAllowedAsync(IProviderAdapter provider)
         {
@@ -36,7 +37,9 @@ namespace OMNIX.Core.AiGateway
                     "Switch to a local AI provider (Ollama / LM Studio / loopback Custom) or change Privacy Mode in Settings.");
             }
 
-            if (_sessionApproved) return;
+            string identity = provider.Info.Id;
+            if (identity == "custom" || identity == "agentrouter") identity += "|" + SettingsManager.Instance.Settings.EndpointConfig(provider.Info.Id).BaseUrl;
+            lock (_sessionApproved) { if (_sessionApproved.Contains(identity)) return; }
 
             if (CloudConfirmationCallback == null)
             {
@@ -55,7 +58,7 @@ namespace OMNIX.Core.AiGateway
                     "PrivacyMode=AskBeforeSending; user declined.",
                     "Use a local AI provider, or change Privacy Mode in Settings.");
             }
-            if (remember) _sessionApproved = true;
+            if (remember) { lock (_sessionApproved) _sessionApproved.Add(identity); }
             Logger.Gateway("PrivacyGate: cloud send approved (rememberSession=" + remember + ")");
         }
 

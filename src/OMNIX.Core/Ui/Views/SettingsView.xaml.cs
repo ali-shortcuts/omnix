@@ -413,6 +413,7 @@ namespace OMNIX.Core.Ui
             settings.Theme = (ThemeMode)ThemeCombo.SelectedIndex;
             SettingsManager.Instance.Save();
             Theming.ThemeManager.Instance.ApplyTo(ParentWorkspace());
+            Theming.ThemeManager.Instance.NotifySettingsChanged();
         }
 
         private System.Windows.FrameworkElement ParentWorkspace()
