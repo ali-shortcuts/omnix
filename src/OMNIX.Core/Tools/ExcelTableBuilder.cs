@@ -29,6 +29,8 @@ namespace OMNIX.Core.Tools
                 if (string.IsNullOrWhiteSpace(text) || text.Length > 100 || !names.Add(text.Trim()))
                     throw new ArgumentException("Headers must be distinct nonempty text, at most 100 characters.");
             }
+            if ((rows.Count + 1) * headers.Count > 512)
+                throw new ArgumentException("Create at most 512 cells per table operation; split larger imports into stages.");
             foreach (var token in rows)
             {
                 var row = token as JArray;
@@ -105,6 +107,17 @@ namespace OMNIX.Core.Tools
                     Type.Missing, Excel.XlYesNoGuess.xlYes, Type.Missing);
                 table.TableStyle = "TableStyleMedium2";
                 area.Columns.ColumnWidth = 18;
+                for (int y = 0; y < rows.Count; y++) for (int c = 0; c < headers.Count; c++)
+                {
+                    var cell = (Excel.Range)created.Cells[y+2,c+1]; var expected = rows[y][c];
+                    object actual = cell.Value2;
+                    bool matches = expected.Type == JTokenType.Null ? actual == null
+                        : expected.Type == JTokenType.String ? Convert.ToString(actual) == (string)expected
+                        : expected.Type == JTokenType.Boolean ? actual is bool && (bool)actual == (bool)expected
+                        : actual != null && Convert.ToDouble(actual) == (double)expected;
+                    if (!matches || Convert.ToBoolean(cell.HasFormula))
+                        throw new InvalidOperationException("Cell verification failed; the table was not accepted.");
+                }
                 if (table.ListColumns.Count != headers.Count || table.ListRows.Count != Math.Max(1, rows.Count))
                     throw new InvalidOperationException("Table dimensions did not match the approved plan.");
                 for (int c = 0; c < headers.Count; c++)

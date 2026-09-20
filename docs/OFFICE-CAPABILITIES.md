@@ -22,7 +22,7 @@ already verified replacement for a database designer/accountant.
 - Excel `create_data_table`: one new named worksheet with a styled table, up to
   24 columns/50 data rows and a 32000-character plan. Each write is previewed.
   Existing sheets are not overwritten. Strings are literal, not executed formulas.
-  Headers/table dimensions are read back. A failed operation attempts to remove
+  Headers, cell values and table dimensions are read back. Each operation is capped at 512 cells including headers. A failed operation attempts to remove
   only its own new worksheet and reports cleanup failure rather than claiming
   atomic success. Empty data creates one blank input row. Delete the new sheet
   to reverse; native Ctrl+Z is not guaranteed for this operation.

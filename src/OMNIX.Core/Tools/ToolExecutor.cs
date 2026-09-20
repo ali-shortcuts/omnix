@@ -216,7 +216,7 @@ namespace OMNIX.Core.Tools
             EnsureRequestScope(ct);
             adapter.ApplyWrite(call.Name, call.ArgumentsJson);
             string hint = call.Name == ToolNames.CreateDataTable
-                ? "New worksheet and data table created; headers and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
+                ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
                 : Localization.Strings.T("S.Tools.Applied");
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
