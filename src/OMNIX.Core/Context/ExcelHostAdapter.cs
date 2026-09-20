@@ -537,8 +537,6 @@ namespace OMNIX.Core.Context
 
             switch (toolName)
             {
-                case ToolNames.CreateDataTable:
-                    return ExcelTableBuilder.Prepare(_app, argumentsJson);
                 case ToolNames.WriteToCell:
                     target.Value2 = args.Get("value", "");
                     break;
