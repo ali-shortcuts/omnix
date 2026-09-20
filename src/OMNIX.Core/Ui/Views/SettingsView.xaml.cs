@@ -80,6 +80,7 @@ namespace OMNIX.Core.Ui
                 {
                     ProviderCombo.SelectedItem = selected.Info;
                     UpdateProviderUi(selected.Info);
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
                     TestResultText.Text = BuildProviderSummary(selected.Info);
                 }
 
@@ -128,6 +129,7 @@ namespace OMNIX.Core.Ui
         {
             if (info == null) return;
 
+            CustomProviderSection.Visibility = info.Id == "custom" ? Visibility.Visible : Visibility.Collapsed;
             bool needsKey = info.RequiresApiKey;
             bool hasKey = needsKey && SettingsManager.Instance.HasApiKey(info.Id);
 
@@ -299,6 +301,7 @@ namespace OMNIX.Core.Ui
             var info = ProviderCombo.SelectedItem as ProviderInfo;
             if (info == null) return;
 
+            TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
             TestResultText.Text = "Loading models…";
             SaveProviderFields();
             var operation = BeginProviderOperation(25);
@@ -317,14 +320,15 @@ namespace OMNIX.Core.Ui
                 }
                 string current = ModelCombo.Text;
                 ModelCombo.ItemsSource = ProviderDiagnostics.ModelOptions(models, current);
-                ModelCombo.Text = current;
+                ModelCombo.Text = current; // Preserve a manually entered model ID.
+                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
                 TestResultText.Text = models.Count + " models loaded.";
                 if (info.AccessProfile == ProviderAccessProfile.FreeModelsAvailable)
                     TestResultText.Text += " Free options are prioritized at the top of the list.";
                 if (string.Equals(info.Id, "huggingface", StringComparison.OrdinalIgnoreCase))
                     TestResultText.Text += " Any currently-free provider routes reported by the live Hugging Face catalog are prioritized.";
-                TestResultText.Text += "\n" + BuildProviderSummary(info);
+                TestResultText.Text += "\nSelect a model, then use Test Connection. Model discovery does not verify Vision.";
             }
             catch (OmnixException ex)
             {
@@ -359,6 +363,7 @@ namespace OMNIX.Core.Ui
             SaveGeneralFields();
             SettingsManager.Instance.Save();
             var operation = BeginProviderOperation(30);
+            TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
             TestResultText.Text = "Testing…";
             try
             {

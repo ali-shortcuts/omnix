@@ -40,7 +40,7 @@ namespace OMNIX.Core.AiGateway.Adapters
                 DisplayName = "Google Gemini",
                 Kind = ProviderKind.Cloud,
                 Vision = VisionSupport.Yes,
-                DefaultModel = "gemini-3.8-flash",
+                DefaultModel = "",
                 RequiresApiKey = true,
                 Notes = "Multimodal Gemini provider. Current access/price metadata is maintained in ProviderRegistry."
             };
@@ -106,6 +106,9 @@ namespace OMNIX.Core.AiGateway.Adapters
         {
             if (_creds == null || string.IsNullOrEmpty(_creds.ApiKey))
                 throw OmnixException.Auth("No Gemini API key configured.");
+
+            if (string.IsNullOrWhiteSpace(Model))
+                throw OmnixException.Model("Select a Gemini model from Load Models or enter a model ID before sending.");
 
             string url = Base + "/models/" + Uri.EscapeDataString(Model) +
                          (onDelta != null ? ":streamGenerateContent?alt=sse" : ":generateContent");

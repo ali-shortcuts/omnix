@@ -331,6 +331,7 @@ jobs:
             build/artifact/runtime-policy-acceptance.json
             build/artifact/setup-powershell-acceptance.json
             build/artifact/workspace-startup-acceptance.json
+            build/artifact/settings-*.png
             build/artifact/inno-compile.log
             build/defender-report.txt
             build/logs/*.binlog
