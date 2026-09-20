@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -117,6 +117,41 @@ namespace OMNIX.Core.Context
                 Logging.Logger.Error("startup-debug", "PowerPointHostAdapter.ReadDocument failed", ex);
                 return "(unable to read presentation)";
             }
+        }
+
+        public string ReadDocumentMap(int offset)
+        {
+            var pres = _app.ActivePresentation;
+            int total = pres.Slides.Count, end = Math.Min(total, offset + 20);
+            var sb = new StringBuilder();
+            sb.AppendLine("Slides=" + total + "; offset=" + offset);
+            for (int i = offset + 1; i <= end; i++)
+            {
+                var slide = pres.Slides[i];
+                sb.AppendLine("slide=" + i + "; shapes=" + slide.Shapes.Count
+                    + "; title=" + TextUtil.Truncate(GetSlideTitle(slide), 120));
+            }
+            sb.AppendLine("nextOffset=" + (end < total ? end.ToString() : "none"));
+            sb.AppendLine("Read each shape by slide/shape/start/count. Shape text is not a full visual inspection; tables, groups and embedded objects may require slide capture.");
+            return sb.ToString();
+        }
+
+        public string ReadDocumentSection(ToolArguments args)
+        {
+            var pres = _app.ActivePresentation;
+            int slideIndex = args.Integer("slide", 1, 1, pres.Slides.Count);
+            var slide = pres.Slides[slideIndex];
+            int shapeIndex = args.Integer("shape", 1, 1, slide.Shapes.Count);
+            var shape = slide.Shapes[shapeIndex];
+            if (shape.HasTextFrame != Office.MsoTriState.msoTrue)
+                return "This shape has no text frame. Use capture_slide_as_image for its visible content.";
+            var range = shape.TextFrame.TextRange;
+            int start = args.Integer("start", 0, 0, range.Length);
+            int count = args.Integer("count", 3000, 1, 4000);
+            int length = Math.Min(count, range.Length - start);
+            string text = length == 0 ? "" : range.Characters(start + 1, length).Text;
+            return "Slide=" + slideIndex + "; shape=" + shapeIndex + "; text [" + start + "," + (start+length)
+                + "); nextStart=" + (start+length < range.Length ? (start+length).ToString() : "none") + "\n" + text;
         }
 
         public byte[] CaptureChartAsImage(string chartName) { return null; }

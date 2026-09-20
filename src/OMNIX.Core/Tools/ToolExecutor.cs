@@ -102,6 +102,18 @@ namespace OMNIX.Core.Tools
 
             switch (call.Name)
             {
+                case ToolNames.ReadDocumentMap:
+                case ToolNames.ReadDocumentSection:
+                {
+                    var indexed = adapter as IIndexedHostAdapter;
+                    if (indexed == null) return ToolResult.Fail("Structured navigation is unavailable for this host.");
+                    var args = ToolArguments.Parse(call.ArgumentsJson);
+                    EnsureRequestScope(ct);
+                    string data = call.Name == ToolNames.ReadDocumentMap
+                        ? indexed.ReadDocumentMap(args.Integer("offset", 0, 0, 1000000))
+                        : indexed.ReadDocumentSection(args);
+                    return ToolResult.Ok(UntrustedData.Wrap("BOUNDED DOCUMENT NAVIGATION RESULT", data));
+                }
                 case ToolNames.ReadSelection:
                 {
                     EnsureRequestScope(ct);
@@ -203,7 +215,9 @@ namespace OMNIX.Core.Tools
 
             EnsureRequestScope(ct);
             adapter.ApplyWrite(call.Name, call.ArgumentsJson);
-            string hint = Localization.Strings.T("S.Tools.Applied");
+            string hint = call.Name == ToolNames.CreateDataTable
+                ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
+                : Localization.Strings.T("S.Tools.Applied");
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
     }

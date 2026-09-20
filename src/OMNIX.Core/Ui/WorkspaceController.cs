@@ -58,9 +58,7 @@ namespace OMNIX.Core.Ui
 
             _toolExecutor = new ToolExecutor();
             _toolExecutor.WriteConfirmation = preview =>
-                Application.Current != null
-                    ? RunOnUiThread(() => OmnixDialogs.ConfirmWritePreview(preview))
-                    : Task.FromResult(false);
+                RunOnUiThread(() => OmnixDialogs.ConfirmWritePreview(preview));
 
             // This callback now belongs only to THIS workspace's PrivacyGate, so "remember for this
             // session" cannot silently approve a different document window.
@@ -266,9 +264,9 @@ namespace OMNIX.Core.Ui
                         // Office COM here. The version check is in-memory and the UI update is
                         // dispatched only while the originating document scope remains valid.
                         if (!IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
-                        var app = Application.Current;
-                        if (app == null) return;
-                        app.Dispatcher.BeginInvoke(new Action(delegate
+                        var dispatcher = View.Dispatcher;
+                        if (dispatcher.HasShutdownStarted) return;
+                        dispatcher.BeginInvoke(new Action(delegate
                         {
                             if (!IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
                             sb.Append(delta);
@@ -483,11 +481,15 @@ namespace OMNIX.Core.Ui
             _historyStore.Save(requestDocKey, _turns);
         }
 
-        private static Task<T> RunOnUiThread<T>(Func<T> action)
+        private Task<T> RunOnUiThread<T>(Func<T> action)
         {
-            var app = Application.Current;
-            if (app == null) return Task.FromResult(default(T));
-            return Task.FromResult(app.Dispatcher.Invoke(action));
+            // VSTO owns a WinForms message loop, not a WPF Application. The pane's
+            // dispatcher is the Office UI dispatcher even when Application.Current is null.
+            if (_disposed || View == null) return Task.FromResult(default(T));
+            var dispatcher = View.Dispatcher;
+            if (dispatcher.HasShutdownStarted) return Task.FromResult(default(T));
+            if (dispatcher.CheckAccess()) return Task.FromResult(action());
+            return dispatcher.InvokeAsync(() => _disposed ? default(T) : action()).Task;
         }
 
         private static async void ObserveBackground(Task task, string operation)

@@ -15,6 +15,11 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Controls.Primitives;
 using OMNIX.Core.Settings;
+using OMNIX.Core.Context;
+using OMNIX.Core.Tools;
+using OMNIX.Core.Storage;
+using System.Threading.Tasks;
+using System.Reflection;
 using System.IO;
 using OMNIX.Core.Ui;
 using OMNIX.Core.Localization;
@@ -74,6 +79,59 @@ class WorkspaceStartupRegression {
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
+    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter {
+        public int Reads;
+        public HostType Host { get { return HostType.Excel; } }
+        public string HostDisplayName { get { return "Excel"; } }
+        public OfficeContext ReadContext() { return new OfficeContext { Host=HostType.Excel,DocumentName="navigation-test.xlsx" }; }
+        public string ReadSelection() { return "selection"; }
+        public string ReadDocument(int max) { return "document"; }
+        public string ReadDocumentMap(int offset) { Reads++; return "offset="+offset; }
+        public string ReadDocumentSection(ToolArguments args) { Reads++; return "cell-data"; }
+        public byte[] CaptureChartAsImage(string name) { return null; }
+        public byte[] CaptureSlideAsImage(int index) { return null; }
+        public byte[] CaptureCurrentViewAsImage() { return null; }
+        public WritePreview PrepareWrite(string name,string json) { throw new NotSupportedException(); }
+        public void ApplyWrite(string name,string json) { throw new NotSupportedException(); }
+    }
+    static void CapabilityRegression() {
+        var host=new FakeHost(); var executor=new ToolExecutor();
+        var map=new ToolCall { Name=ToolNames.ReadDocumentMap,ArgumentsJson="{\"offset\":20}" };
+        Check(executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==1,"Map navigation failed");
+        var section=new ToolCall { Name=ToolNames.ReadDocumentSection,ArgumentsJson="{}" };
+        Check(executor.ExecuteAsync(section,host).GetAwaiter().GetResult().Success && host.Reads==2,"Section navigation failed");
+        executor.RequestScopeValidator=()=>false;
+        try { executor.ExecuteAsync(section,host).GetAwaiter().GetResult(); throw new Exception("Stale navigation was allowed"); }
+        catch(OperationCanceledException) {}
+        Check(host.Reads==2,"Stale request read another document");
+        executor.RequestScopeValidator=()=>true;
+        map.ArgumentsJson="{\"offset\":-1}";
+        Check(!executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==2,"Invalid offset crossed host boundary");
+        string valid="{\"sheet\":\"Products\",\"headers\":[\"ID\",\"Price\"],\"rows\":[[\"001\",12.5]]}";
+        Check(ExcelTableBuilder.ValidatePlan(valid)!=null,"Valid table rejected");
+        foreach(string invalid in new[]{valid.Replace("Products","Bad/Name"),valid.Replace("Price","ID"),valid.Replace("12.5]","12.5,4]"),"{}",new string('x',32001)}) {
+            bool rejected=false; try { ExcelTableBuilder.ValidatePlan(invalid); } catch { rejected=true; }
+            Check(rejected,"Invalid table plan accepted");
+        }
+        string prompt=SystemPromptBuilder.Build(host,host.ReadContext());
+        Check(prompt.Contains("ACTIVE OFFICE HOST: Excel") && prompt.Contains("read_document_section") && prompt.Contains("create_data_table"),"Host capabilities missing from prompt");
+        Check(!prompt.Contains("rewrite_selected_text {text}"),"Foreign host write tool advertised");
+        using(var controller=new WorkspaceController(host,new ChatHistoryStore())) {
+            var method=typeof(WorkspaceController).GetMethod("RunOnUiThread",BindingFlags.Instance|BindingFlags.NonPublic).MakeGenericMethod(typeof(bool));
+            int uiThread=Thread.CurrentThread.ManagedThreadId;
+            Func<bool> action=()=>Thread.CurrentThread.ManagedThreadId==uiThread;
+            var same=(Task<bool>)method.Invoke(controller,new object[]{action});
+            Check(same.GetAwaiter().GetResult(),"Office pane UI callback failed without Application.Current");
+            var background=Task.Run(async ()=> await (Task<bool>)method.Invoke(controller,new object[]{action}));
+            var deadline=Stopwatch.StartNew();
+            while(!background.IsCompleted && deadline.ElapsedMilliseconds<5000) {
+                var frame=new DispatcherFrame();
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>frame.Continue=false));
+                Dispatcher.PushFrame(frame);
+            }
+            Check(background.IsCompleted && background.GetAwaiter().GetResult(),"Background callback missed pane dispatcher");
+        }
+    }
     [STAThread] static int Main() {
         try {
             // Cold lookup on a background thread before there is a WPF Application or view.
@@ -86,6 +144,7 @@ class WorkspaceStartupRegression {
             Check(thread.Join(10000), "Cold localization timed out");
             if (backgroundError != null) throw backgroundError;
             Check(Application.Current == null, "Test must model Office without a WPF Application");
+            CapabilityRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");
@@ -126,6 +185,7 @@ $source | Set-Content $file -Encoding UTF8
 $refs = @('System.dll','System.Core.dll','System.Xaml.dll','System.Windows.Forms.dll','System.Drawing.dll') | ForEach-Object { Join-Path $framework $_ }
 $refs += @('WindowsBase.dll','PresentationCore.dll','PresentationFramework.dll','WindowsFormsIntegration.dll') | ForEach-Object { Join-Path $wpf $_ }
 $refs += Join-Path $bin 'OMNIX.Core.dll'
+$refs += Join-Path $bin 'Newtonsoft.Json.dll'
 $args = @('/nologo','/target:exe',('/out:' + $exe)) + @($refs | ForEach-Object { '/reference:' + $_ }) + @($file)
 & (Join-Path $framework 'csc.exe') @args
 if ($LASTEXITCODE -ne 0) { throw 'WPF regression harness failed to compile.' }
@@ -149,6 +209,6 @@ Get-Content $stdout | Write-Host
 Get-Content $stderr | Write-Host
 if ($p.ExitCode -ne 0) { throw "WPF startup regression failed ($($p.ExitCode))." }
 New-Item -ItemType Directory -Force (Join-Path $root 'build\artifact') | Out-Null
-@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
+@{TestId='WORKSPACE-STARTUP-WPF-001';OverallPass=$true;Cycles=3;ColdBackgroundLocalization=$true;CredentialConstructionBounded=$true;DarkAndLightDropdownContrastPass=$true;EditableModelBindingPass=$true;OfficePaneDispatcherPass=$true;NavigationScopeIsolationPass=$true;TablePlanValidationPass=$true;RealOfficeTested=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'build\artifact\workspace-startup-acceptance.json')
 
 Remove-Item -LiteralPath $file,$exe,$stdout,$stderr -Force
