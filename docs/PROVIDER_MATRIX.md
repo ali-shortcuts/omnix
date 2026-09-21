@@ -49,3 +49,18 @@ Provider code compiling is not enough for release. Before OMNIX v3 is considered
 10. Verify every Settings `Get API Key` / docs button opens only the intended provider-owned HTTPS host.
 
 Do not mark an unexecuted provider test PASS.
+
+
+## Connection vs model diagnostics
+
+OMNIX does not treat a model catalog as proof of usable inference.
+
+- **Test connection** checks endpoint/authentication/catalog without using a model.
+- **Detect models** lists the live advertised catalog.
+- **Test model** verifies the selected model with a tiny synthetic text request.
+- **Verify models** can test up to 100 detected IDs sequentially with bounded per-model timeouts and
+  exposes which IDs actually work for the current provider/API configuration.
+
+A provider can therefore be connected while a specific model is unavailable, denied, rate-limited,
+or incompatible. Those states are intentionally reported separately.
+
