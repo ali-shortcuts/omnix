@@ -203,7 +203,6 @@ namespace OMNIX.Core.AiGateway.Http
                 if (!_anthropic)
                 {
                     payload["tool_choice"] = "auto";
-                    payload["parallel_tool_calls"] = false;
                 }
             }
             if (_anthropic)
