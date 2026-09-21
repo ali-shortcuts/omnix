@@ -16,7 +16,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -339,8 +339,13 @@ namespace OMNIX.Core.Context
             }
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.Word, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return WordCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { WordCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) return PrepareCapability(argumentsJson);
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR,
                     "Tool '" + toolName + "' is not supported by Word.",
@@ -367,6 +372,7 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) { ApplyCapability(argumentsJson); return; }
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR, "Unknown Word write tool: " + toolName, "", "");
 
