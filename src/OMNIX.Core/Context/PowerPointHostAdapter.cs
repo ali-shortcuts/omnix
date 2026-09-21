@@ -44,6 +44,21 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                try
+                {
+                    string capability = args.Get("capability", "");
+                    var nested = args.Token("args") as Newtonsoft.Json.Linq.JObject;
+                    int slideIndex = 0;
+                    if (nested != null && nested["slide"] != null) int.TryParse(nested["slide"].ToString(), out slideIndex);
+                    ActivateCapabilityRibbonTab(capability);
+                    if (slideIndex > 0 && _app.ActiveWindow != null && _app.ActivePresentation != null &&
+                        slideIndex <= _app.ActivePresentation.Slides.Count)
+                        _app.ActiveWindow.View.GotoSlide(slideIndex);
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             try
             {
@@ -82,6 +97,23 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "PowerPoint visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("animation.", StringComparison.OrdinalIgnoreCase)
+                ? "TabAnimations"
+                : capability.StartsWith("transition.", StringComparison.OrdinalIgnoreCase)
+                    ? "TabTransitions"
+                    : capability.StartsWith("slide.background", StringComparison.OrdinalIgnoreCase)
+                        ? "TabDesign"
+                        : capability.StartsWith("shape.", StringComparison.OrdinalIgnoreCase) ||
+                          capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                          capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase)
+                            ? "TabInsert"
+                            : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
