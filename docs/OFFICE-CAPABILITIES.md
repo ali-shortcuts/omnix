@@ -36,9 +36,9 @@ already verified replacement for a database designer/accountant.
   new worksheet and reports cleanup failure rather than claiming atomic success.
   Empty data creates one blank input row. Delete the new sheet to reverse; native
   Ctrl+Z is not guaranteed for this operation.
-- Eight provider turns per request, followed by an explicit incomplete-work notice
-  if exhausted. Large jobs must be staged; this does not promise autonomous
-  completion of an arbitrarily large workbook.
+- Up to 24 provider/tool turns per request, followed by an explicit incomplete-work
+  notice if exhausted. This is enough room for ordinary inspect → create → read-back
+  multi-sheet workflows while remaining bounded; very large jobs still must be staged.
 - Consent/write dialogs and streaming use the pane dispatcher even when the Office
   process has no WPF Application object.
 
