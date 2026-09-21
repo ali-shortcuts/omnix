@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using OMNIX.Core.AiGateway;
 
 namespace OMNIX.Core.Tools
 {
@@ -152,6 +153,25 @@ namespace OMNIX.Core.Tools
         private const string XmlMarker = "<tool_call>";
         private const string NativeMarker = "<|tool_call_start|>";
         private const string NativeEndMarker = "<|tool_call_end|>";
+
+        public static ToolCall FromNative(NativeToolCall native)
+        {
+            if (native == null || string.IsNullOrWhiteSpace(native.Name)) return Invalid("Missing native tool name");
+            string args = string.IsNullOrWhiteSpace(native.ArgumentsJson) ? "{}" : native.ArgumentsJson.Trim();
+            try
+            {
+                var obj = JObject.Parse(args);
+                return new ToolCall
+                {
+                    Name = ToolNames.Normalize(native.Name),
+                    ArgumentsJson = obj.ToString(Formatting.None)
+                };
+            }
+            catch
+            {
+                return Invalid("Malformed native tool arguments");
+            }
+        }
 
         public static ToolCall Parse(string reply)
         {
