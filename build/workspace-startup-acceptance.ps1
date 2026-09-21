@@ -125,8 +125,9 @@ class WorkspaceStartupRegression {
         public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
             Calls++;
             string write="```omnix_tool\n{\"tool\":\"create_data_table\",\"args\":{\"sheet\":\"Test\",\"headers\":[\"ID\"],\"rows\":[[1]]}}\n```";
+            string verify="```omnix_tool\n{\"tool\":\"read_document_section\",\"args\":{\"sheet\":\"Test\",\"row\":1,\"column\":1,\"rows\":2,\"columns\":1}}\n```";
             string answer = CancelScenario ? (Calls==1 ? write : "Write access is unavailable")
-                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : "Verified completed";
+                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : Calls==3 ? verify : "Verified completed";
             if(delta!=null) delta(answer);
             return Task.FromResult(new ChatResponse { Text=answer });
         }
@@ -148,6 +149,13 @@ class WorkspaceStartupRegression {
                         ArgumentsJson="{\"sheet\":\"NativeTest\",\"headers\":[\"ID\"],\"rows\":[[1]]}" }
                 }
             });
+            if(Calls==2) return Task.FromResult(new ChatResponse {
+                Text="",
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-2", Name="read_document_section",
+                        ArgumentsJson="{\"sheet\":\"NativeTest\",\"row\":1,\"column\":1,\"rows\":2,\"columns\":1}" }
+                }
+            });
             return Task.FromResult(new ChatResponse { Text="Verified completed" });
         }
     }
@@ -166,9 +174,10 @@ class WorkspaceStartupRegression {
             var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
             var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },
                 host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
-            Check(provider.Calls==2,"Native tool response did not continue to final provider turn");
+            Check(provider.Calls==3,"Native tool response did not require read-back before final provider turn");
             Check(confirmations==1 && host.Writes==1,"Native tool call with empty text was not executed through confirmation");
-            Check(result.Text=="Verified completed","Native tool loop did not return final answer");
+            Check(host.Reads>=2,"Latest write was not read back after execution");
+            Check(result.Text=="Verified completed","Native tool loop did not return final answer after read-back");
         } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
 
@@ -186,8 +195,11 @@ class WorkspaceStartupRegression {
                 var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(!cancel); } };
                 var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
                 Check(confirmations==1 && host.Writes==(cancel ? 0 : 1),"Recovery bypassed confirmation or failed to execute approved write");
-                Check(provider.Calls==(cancel ? 2 : 3),"Recovery retried cancelled write or exceeded bounded repair");
-                if(!cancel) Check(result.Text=="Verified completed","Gateway did not return corrected final answer");
+                Check(provider.Calls==(cancel ? 2 : 4),"Recovery retried cancelled write or skipped required read-back");
+                if(!cancel) {
+                    Check(host.Reads>=2,"Recovery path did not read back the successful write");
+                    Check(result.Text=="Verified completed","Gateway did not return corrected final answer after verification");
+                }
             }
         } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
