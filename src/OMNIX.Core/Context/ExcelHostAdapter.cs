@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Excel = Microsoft.Office.Interop.Excel;
+using Office = Microsoft.Office.Core;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Tools;
 using OMNIX.Core.Util;
@@ -18,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -27,6 +28,7 @@ namespace OMNIX.Core.Context
         private readonly Excel.Application _app;
         private readonly Func<int> _maxCells;
         private readonly Func<int> _maxChars;
+        private Office.IRibbonUI _ribbonUi;
 
         public ExcelHostAdapter(Excel.Application app, Func<int> maxCells, Func<int> maxChars)
         {
@@ -37,6 +39,127 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
+
+        public string CapabilitySummary
+        {
+            get
+            {
+                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, cell values, formulas and range highlighting. Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
+            }
+        }
+
+        public void BindRibbon(Office.IRibbonUI ribbonUi) { _ribbonUi = ribbonUi; }
+
+        public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
+        {
+            ActivateRelevantRibbonTab(toolName);
+            var wb = _app.ActiveWorkbook;
+            if (wb == null) return;
+
+            try
+            {
+                if (toolName == ToolNames.ReadDocumentSection)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    if (string.IsNullOrWhiteSpace(sheetName)) return;
+                    var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws == null) return;
+                    int row = args.Integer("row", 1, 1, 1048576);
+                    int col = args.Integer("column", 1, 1, 16384);
+                    int rows = args.Integer("rows", 10, 1, 100);
+                    int cols = args.Integer("columns", 8, 1, 32);
+                    ShowRange(((Excel.Range)ws.Cells[row, col]).Resize[rows, cols]);
+                    return;
+                }
+
+                if (toolName == ToolNames.WriteToCell || toolName == ToolNames.InsertFormula ||
+                    toolName == ToolNames.HighlightRange)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    var ws = string.IsNullOrWhiteSpace(sheetName)
+                        ? _app.ActiveSheet as Excel.Worksheet
+                        : wb.Worksheets[sheetName] as Excel.Worksheet;
+                    string address = args.Get("address", args.Get("range", ""));
+                    if (ws != null && !string.IsNullOrWhiteSpace(address))
+                        ShowRange(ws.Range[address]);
+                    return;
+                }
+
+                if (toolName == ToolNames.CreateDataTable && stage == OfficeExecutionStage.Verify)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    if (string.IsNullOrWhiteSpace(sheetName)) return;
+                    var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws == null) return;
+                    ws.Activate();
+                    Excel.Range target = null;
+                    try
+                    {
+                        if (ws.ListObjects.Count > 0) target = ws.ListObjects[1].Range;
+                    }
+                    catch { }
+                    if (target == null) target = ws.UsedRange;
+                    if (target != null) ShowRange(target);
+                    return;
+                }
+
+                if (toolName == ToolNames.CaptureChartAsImage)
+                {
+                    string chartName = args.Get("chart", "");
+                    var ws = _app.ActiveSheet as Excel.Worksheet;
+                    if (ws == null) return;
+                    foreach (Excel.ChartObject chart in (Excel.ChartObjects)ws.ChartObjects())
+                    {
+                        if (string.IsNullOrWhiteSpace(chartName) ||
+                            string.Equals(chart.Name, chartName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            chart.Activate();
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("ui", "Excel visible execution target reveal failed", ex);
+            }
+        }
+
+        private void ActivateRelevantRibbonTab(string toolName)
+        {
+            string tab = null;
+            switch (toolName)
+            {
+                case ToolNames.InsertFormula: tab = "TabFormulas"; break;
+                case ToolNames.CreateDataTable: tab = "TabInsert"; break;
+                case ToolNames.ReadDocumentMap:
+                case ToolNames.ReadDocumentSection: tab = "TabData"; break;
+                case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
+                case ToolNames.WriteToCell:
+                case ToolNames.HighlightRange:
+                case ToolNames.ReadSelection:
+                case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+            }
+            if (tab == null || _ribbonUi == null) return;
+            try { _ribbonUi.ActivateTabMso(tab); }
+            catch { }
+        }
+
+        private void ShowRange(Excel.Range range)
+        {
+            if (range == null) return;
+            try
+            {
+                var ws = range.Worksheet as Excel.Worksheet;
+                if (ws != null) ws.Activate();
+                _app.Goto(range, true);
+                range.Select();
+            }
+            catch
+            {
+                try { range.Select(); } catch { }
+            }
+        }
 
         public OfficeContext ReadContext()
         {
