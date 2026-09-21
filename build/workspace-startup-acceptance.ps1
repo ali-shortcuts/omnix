@@ -213,6 +213,23 @@ class WorkspaceStartupRegression {
             Check(thread.Join(10000), "Cold localization timed out");
             if (backgroundError != null) throw backgroundError;
             Check(Application.Current == null, "Test must model Office without a WPF Application");
+            var xmlCall = OMNIX.Core.Tools.ToolCallParser.Parse("Checking...<tool_call>omnix_tool\n{\"tool\":\"read_document_section\",\"args\":{\"sheet\":\"test\"}}</tool_call>");
+            Check(xmlCall != null && xmlCall.Name == "read_document_section", "XML tool call not parsed");
+            Check(OMNIX.Core.Tools.ToolCallParser.Parse("```omnix_tool {\"tool\":\"read_selection\"}```").Name == "read_selection", "Inline fenced call not parsed");
+            Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>broken").Name == "", "Incomplete call must fail closed");
+            Check(OMNIX.Core.Tools.ToolCallParser.Parse("plain answer") == null, "Plain answer treated as a tool");
+            Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>{\"tool\":\"read_selection\"}</tool_call><tool_call>{}</tool_call>").Name == "", "Ambiguous calls accepted");
+            var filterType = typeof(OMNIX.Core.Tools.ToolCallParser).Assembly.GetType("OMNIX.Core.AiGateway.ToolProtocolDeltaFilter", true);
+            foreach (string protocol in new[] { "<tool_call>omnix_tool\n{}\n</tool_call>", "```omnix_tool\n{}\n```" })
+            {
+                var visible = new System.Text.StringBuilder();
+                var filter = Activator.CreateInstance(filterType, new object[] { new Action<string>(part => visible.Append(part)) });
+                foreach (char ch in "Visible prefix " + protocol)
+                    filterType.GetMethod("OnDelta").Invoke(filter, new object[] { ch.ToString() });
+                filterType.GetMethod("Complete").Invoke(filter, new object[] { false, protocol });
+                Check(visible.ToString() == "Visible prefix ", "Split tool protocol leaked into chat");
+            }
+            Check(OMNIX.Core.Reference.OfficeReference.Search("Excel", "DSUM").Contains("functions/dsum-function"), "Reference catalog missing DSUM");
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();

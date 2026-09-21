@@ -13,6 +13,8 @@ namespace OMNIX.Core.Tools
     public static class ToolNames
     {
         // read-only
+        public const string SearchConversation = "search_conversation";
+        public const string SearchOfficeReference = "search_office_reference";
         public const string ReadDocumentMap = "read_document_map";
         public const string ReadDocumentSection = "read_document_section";
         public const string ReadSelection = "read_selection";
@@ -33,7 +35,7 @@ namespace OMNIX.Core.Tools
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
-            ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
+            SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage,
             CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
         };
@@ -127,21 +129,32 @@ namespace OMNIX.Core.Tools
         public static ToolCall Parse(string reply)
         {
             if (string.IsNullOrEmpty(reply)) return null;
-            const string marker = "```omnix_tool";
-            int idx = reply.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) return null;
-
+            const string fenced = "```omnix_tool";
+            const string xml = "<tool_call>";
+            int fenceIndex = reply.IndexOf(fenced, StringComparison.OrdinalIgnoreCase);
+            int xmlIndex = reply.IndexOf(xml, StringComparison.OrdinalIgnoreCase);
+            if (fenceIndex < 0 && xmlIndex < 0) return null;
+            bool useXml = xmlIndex >= 0 && (fenceIndex < 0 || xmlIndex < fenceIndex);
+            string marker = useXml ? xml : fenced;
+            int idx = useXml ? xmlIndex : fenceIndex;
             int start = idx + marker.Length;
-            while (start < reply.Length && reply[start] != '\n') start++;
-            int end = reply.IndexOf("```", start, StringComparison.Ordinal);
-            if (end < 0) return null;
+            string closing = useXml ? "</tool_call>" : "```";
+            int end = reply.IndexOf(closing, start, StringComparison.OrdinalIgnoreCase);
+            // Malformed or ambiguous calls must produce a tool error, never a success answer.
+            if (end < 0) return new ToolCall { Name = "", ArgumentsJson = "Incomplete tool call" };
+            string remainder = reply.Substring(end + closing.Length);
+            if (remainder.IndexOf(fenced, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                remainder.IndexOf(xml, StringComparison.OrdinalIgnoreCase) >= 0)
+                return new ToolCall { Name = "", ArgumentsJson = "Only one tool call per response is supported" };
             string body = reply.Substring(start, end - start).Trim();
+            if (useXml && body.StartsWith("omnix_tool", StringComparison.OrdinalIgnoreCase))
+                body = body.Substring("omnix_tool".Length).Trim();
 
             try
             {
                 var obj = JObject.Parse(body);
                 string tool = (string)obj["tool"];
-                if (string.IsNullOrEmpty(tool)) return null;
+                if (string.IsNullOrWhiteSpace(tool)) return new ToolCall { Name = "", ArgumentsJson = "Missing tool name" };
                 string args = obj["args"] != null ? obj["args"].ToString(Formatting.None) : "{}";
                 return new ToolCall { Name = tool.Trim(), ArgumentsJson = args };
             }

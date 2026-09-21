@@ -156,11 +156,11 @@
             <TextBlock Text="{DynamicResource S.Settings.Provider}" Style="{StaticResource Section}" />
             <ComboBox x:Name="ProviderCombo" Style="{StaticResource Combo}"
                       DisplayMemberPath="DisplayName" Margin="0,4,0,0"
-                      SelectionChanged="OnProviderChanged" />
+                      SelectionChanged="OnProviderChanged" DropDownOpened="OnProvidersOpened" />
 
             <!-- ============ Custom provider ============ -->
             <StackPanel x:Name="CustomProviderSection" Visibility="Collapsed">
-            <TextBlock Text="Custom" Style="{StaticResource Section}" TextWrapping="Wrap" />
+            <TextBlock Text="Custom Provider" Style="{StaticResource Section}" TextWrapping="Wrap" />
             <TextBlock Text="{DynamicResource S.Settings.CustomName}" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="CustomNameBox" Style="{StaticResource Input}" />
             <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
@@ -184,10 +184,12 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <ComboBox x:Name="ModelCombo" Style="{StaticResource Combo}" IsEditable="True" />
+                <ComboBox x:Name="ModelCombo" Style="{StaticResource Combo}" IsEditable="True" SelectionChanged="OnModelChanged" />
                 <Button x:Name="LoadModelsButton" Grid.Column="1" Style="{StaticResource SetButton}"
                         Content="Detect models" Margin="4,0,0,0" Click="OnLoadModels" />
             </Grid>
+
+            <TextBox x:Name="ManualModelBox" Style="{StaticResource Input}" Visibility="Collapsed" ToolTip="Exact model ID" Margin="0,4,0,0" />
 
             <StackPanel x:Name="ProviderLinksPanel" Orientation="Horizontal" Margin="0,7,0,0">
                 <Button x:Name="GetApiKeyButton" Style="{StaticResource SetButton}"
@@ -226,6 +228,7 @@
                       Content="{DynamicResource S.Settings.PreferLocal}" />
 
             </StackPanel>
+            <Expander Header="General settings" Foreground="{DynamicResource B.Foreground}" Margin="0,12,0,0"><StackPanel>
             <!-- ============ Privacy ============ -->
             <TextBlock Text="Privacy" Style="{StaticResource Section}" />
             <RadioButton x:Name="PrivacyLocalOnly" Style="{StaticResource Radio}"
@@ -259,6 +262,7 @@
                 <TextBox x:Name="MaxDaysBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource Input}" Margin="0,4,0,0" />
             </Grid>
 
+            </StackPanel></Expander>
             <Button x:Name="SaveButton" Style="{StaticResource SetAccent}" Content="Save"
                     Click="OnSave" Margin="0,16,0,12" HorizontalAlignment="Left" />
         </StackPanel>

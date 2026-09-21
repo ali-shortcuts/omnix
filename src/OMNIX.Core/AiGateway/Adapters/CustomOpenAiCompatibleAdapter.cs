@@ -29,7 +29,7 @@ namespace OMNIX.Core.AiGateway.Adapters
             Info = new ProviderInfo
             {
                 Id = id,
-                DisplayName = "Custom (OpenAI-compatible)",
+                DisplayName = "Custom Provider",
                 Kind = ProviderKind.Cloud,
                 Vision = VisionSupport.DependsOnModel,
                 DefaultModel = "",

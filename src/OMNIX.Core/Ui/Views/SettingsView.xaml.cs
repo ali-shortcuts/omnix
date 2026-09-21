@@ -73,10 +73,11 @@ namespace OMNIX.Core.Ui
                 var settings = SettingsManager.Instance.Settings;
                 var registry = _controller != null ? _controller.GatewayRegistry : null;
 
-                ProviderCombo.ItemsSource = registry != null ? registry.All.Select(p => p.Info).ToList() : null;
+                ProviderCombo.ItemsSource = registry != null ? registry.All.Select(p => p.Info).OrderBy(p => p.Id == "custom" ? 0 : (p.Id == "ollama" || p.Id == "lmstudio" ? 2 : 1)).ToList() : null;
                 var selected = registry != null ? registry.Get(settings.SelectedProviderId) : null;
                 _displayedProviderId = selected != null ? selected.Info.Id : null;
-                ModelCombo.ItemsSource = null;
+                ModelCombo.ItemsSource = new[] { "Custom Model" };
+                ManualModelBox.Visibility = Visibility.Collapsed;
                 if (selected != null)
                 {
                     ProviderCombo.SelectedItem = selected.Info;
@@ -166,6 +167,29 @@ namespace OMNIX.Core.Ui
             return string.Empty;
         }
 
+        private string EffectiveModelId
+        {
+            get { return (ModelCombo.Text == "Custom Model" ? ManualModelBox.Text : ModelCombo.Text).Trim(); }
+        }
+
+        private void OnModelChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ManualModelBox == null) return;
+            bool manual = string.Equals(ModelCombo.SelectedItem as string, "Custom Model", StringComparison.Ordinal);
+            ManualModelBox.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
+            if (manual) ManualModelBox.Focus();
+        }
+
+        private void OnProvidersOpened(object sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (ProviderCombo.Items.Count == 0) return;
+                var item = ProviderCombo.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
+                if (item != null) item.BringIntoView();
+            }));
+        }
+
         private void OnProviderChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_loading) return;
@@ -184,7 +208,8 @@ namespace OMNIX.Core.Ui
             }
             settings.SelectedProviderId = info.Id;
             string model;
-            ModelCombo.ItemsSource = null;
+            ModelCombo.ItemsSource = new[] { "Custom Model" };
+                ManualModelBox.Visibility = Visibility.Collapsed;
             ModelCombo.Text = settings.Models != null && settings.Models.TryGetValue(info.Id, out model) ? model : info.DefaultModel;
 
             ApiKeyBox.Clear();
@@ -305,8 +330,8 @@ namespace OMNIX.Core.Ui
                     TestResultText.Text = "The server returned no model catalog. You can enter a model ID and use Test Connection.";
                     return;
                 }
-                string current = ModelCombo.Text;
-                ModelCombo.ItemsSource = ProviderDiagnostics.ModelOptions(models, current);
+                string current = EffectiveModelId;
+                ModelCombo.ItemsSource = new[] { "Custom Model" }.Concat(ProviderDiagnostics.ModelOptions(models, current)).Distinct().ToList();
                 ModelCombo.Text = current; // Preserve a manually entered model ID.
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
@@ -430,7 +455,14 @@ namespace OMNIX.Core.Ui
             SaveProviderFields();
             SaveGeneralFields();
             SettingsManager.Instance.Save();
+            if (!SettingsManager.Instance.LastSaveSucceeded)
+            {
+                TestResultText.Text = "Could not save settings. Please try again.";
+                return;
+            }
             if (_controller != null) _controller.SaveSettingsFromUi();
+            var workspace = ParentWorkspace() as WorkspaceView;
+            if (workspace != null) workspace.ShowChatTab();
             var info = ProviderCombo.SelectedItem as ProviderInfo;
             if (info != null) UpdateProviderUi(info);
         }
@@ -455,14 +487,14 @@ namespace OMNIX.Core.Ui
             {
                 customConfig.ApiType = CustomApiTypeCombo.SelectedIndex == 1 ? "Anthropic" : "OpenAI";
                 if (!string.Equals(customConfig.BaseUrl, CustomBaseUrlBox.Text.Trim(), StringComparison.Ordinal) ||
-                    (!string.Equals(customConfig.Model, ModelCombo.Text.Trim(), StringComparison.Ordinal)))
+                    (!string.Equals(customConfig.Model, EffectiveModelId, StringComparison.Ordinal)))
                     customConfig.SupportsVision = null;
                 customConfig.Name = CustomNameBox.Text.Trim();
                 customConfig.BaseUrl = CustomBaseUrlBox.Text.Trim();
-                customConfig.Model = ModelCombo.Text.Trim();
+                customConfig.Model = EffectiveModelId;
             }
 
-            settings.Models[_displayedProviderId] = ModelCombo.Text.Trim();
+            settings.Models[_displayedProviderId] = EffectiveModelId;
             string key = ApiKeyBox.Password;
             if (!string.IsNullOrWhiteSpace(key))
                 SettingsManager.Instance.SetApiKey(_displayedProviderId, key.Trim());

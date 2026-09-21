@@ -225,8 +225,11 @@ namespace OMNIX.Core.Settings
             if (Settings.ContextMaxTokens <= 0) Settings.ContextMaxTokens = 3000;
         }
 
+        public bool LastSaveSucceeded { get; private set; }
+
         public void Save()
         {
+            LastSaveSucceeded = false;
             string tmp = null;
             var sensitiveBuffers = new List<byte[]>();
             try
@@ -281,6 +284,7 @@ namespace OMNIX.Core.Settings
                     File.Move(tmp, _path);
                 }
                 tmp = null;
+                LastSaveSucceeded = true;
             }
             catch (Exception ex)
             {
