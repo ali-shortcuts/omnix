@@ -66,6 +66,7 @@ namespace OMNIX.Core.Ui
             ReferenceQuery.ToolTip = persian ? "جستجوی نام تابع یا موضوع" : "Search function name or topic";
             ReferencePreviousButton.Content = persian ? "قبلی" : "Previous";
             ReferenceNextButton.Content = persian ? "بعدی" : "Next";
+            TabLearn.Content = persian ? "راهنما" : "Learn";
 
             ReferenceText.Text = Reference.OfficeReference.Search(
                 host != null ? host.Content.ToString() : "Excel",
