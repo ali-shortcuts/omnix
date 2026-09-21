@@ -234,28 +234,14 @@ namespace OMNIX.Core.AiGateway.Adapters
 
         public async Task<bool> TestConnectionAsync(CancellationToken ct)
         {
-            var request = new ChatRequest
+            try
             {
-                SystemPrompt = null,
-                UserTurn = new ChatTurn
-                {
-                    Role = ChatRole.User,
-                    Text = "ping",
-                    TimestampUtc = DateTime.UtcNow
-                }
-            };
-            using (var minimal = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, minimal.Token))
+                var models = await ListModelsAsync(ct).ConfigureAwait(false);
+                return models != null;
+            }
+            catch
             {
-                try
-                {
-                    var resp = await SendAsync(request, null, linked.Token).ConfigureAwait(false);
-                    return resp != null && resp.Text != null;
-                }
-                catch
-                {
-                    return false;
-                }
+                return false;
             }
         }
 

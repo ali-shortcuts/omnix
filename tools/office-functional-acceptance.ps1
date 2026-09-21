@@ -141,6 +141,9 @@ function Base-Result([string]$officeHostName) {
 
 function Test-Excel {
     $result = Base-Result 'Excel'
+    $result.TypedCellWritePass = $false
+    $result.ProfessionalFormatPass = $false
+    $result.VisibleTargetPass = $false
     $app = $null; $book = $null; $sheet = $null; $selection = $null; $adapter = $null; $executor = $null
     $token = 'OMNIX_E2E_EXCEL_42'
     try {
@@ -190,6 +193,16 @@ function Test-Excel {
         $approveResult = Invoke-Tool $executor $writeCall $adapter
         $afterApprove = [string]$sheet.Range('A4').Value2
         $result.WriteApprovedAppliedPass = [bool]($approveResult.Success -and $afterApprove -eq 'OMNIX_WRITE_OK')
+        $typedCall = New-ToolCall 'write_to_cell' '{"address":"B4","value":42.5}'
+        $typedResult = Invoke-Tool $executor $typedCall $adapter
+        $typedValue = $sheet.Range('B4').Value2
+        $result.TypedCellWritePass = [bool]($typedResult.Success -and [double]$typedValue -eq 42.5)
+
+        $formatCall = New-ToolCall 'format_range' '{"address":"A4:B4","bold":true,"horizontalAlignment":"center","border":"thin","autofitColumns":true}'
+        $formatResult = Invoke-Tool $executor $formatCall $adapter
+        $formatted = $sheet.Range('A4:B4')
+        $result.ProfessionalFormatPass = [bool]($formatResult.Success -and [bool]$formatted.Font.Bold)
+        try { $result.VisibleTargetPass = [bool]([string]$app.Selection.Address($false,$false) -eq 'A4:B4') } catch { $result.VisibleTargetPass = $false }
     }
     catch [System.Runtime.InteropServices.COMException] {
         if ($_.Exception.HResult -eq -2147221164) {
@@ -211,6 +224,7 @@ function Test-Excel {
     }
     $result.Pass = [bool]($result.Installed -and $result.Started -and $result.ContextReadPass -and $result.ReadToolPass -and
         $result.WriteNoConfirmationBlockedPass -and $result.WriteDeniedBlockedPass -and $result.WriteApprovedAppliedPass -and
+        $result.TypedCellWritePass -and $result.ProfessionalFormatPass -and $result.VisibleTargetPass -and
         $result.ProcessExitedCleanly)
     return [pscustomobject]$result
 }

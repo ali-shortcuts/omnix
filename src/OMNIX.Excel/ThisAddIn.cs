@@ -23,6 +23,7 @@ namespace OMNIX.Excel
 
         internal ExcelHostAdapter Adapter { get; private set; }
         internal ExcelTaskPaneService Panes { get; private set; }
+        internal OmnixRibbon Ribbon { get; private set; }
 
         internal static AiGateway SharedGateway;
         internal static ChatHistoryStore SharedHistory;
@@ -43,6 +44,8 @@ namespace OMNIX.Excel
             Adapter = new ExcelHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxCells,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
+
+            if (Ribbon != null) Ribbon.BindAdapterIfReady();
 
             EnsureSharedServices();
 
@@ -107,7 +110,8 @@ namespace OMNIX.Excel
         protected override Office.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
             Logger.Startup("CreateRibbonExtensibilityObject -> OmnixRibbon");
-            return new OmnixRibbon(this);
+            Ribbon = new OmnixRibbon(this);
+            return Ribbon;
         }
 
         #region VSTO generated code

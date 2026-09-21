@@ -201,14 +201,28 @@
                        FontSize="9.5" Foreground="{DynamicResource B.ForegroundDim}" Margin="0,3,0,0"
                        TextWrapping="Wrap" Visibility="Collapsed" />
 
-            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <WrapPanel Margin="0,8,0,0">
                 <Button x:Name="TestButton" Style="{StaticResource SetAccent}"
-                        ToolTip="Sends a short test message to the selected model. Provider usage limits and charges may apply."
-                        Content="{DynamicResource S.Settings.TestConnection}" Click="OnTestConnection" />
-                <Button x:Name="CancelTestButton" Content="Stop" Click="OnCancelTest" Style="{StaticResource SetButton}" Visibility="Collapsed" Margin="6,0,0,0" />
-            </StackPanel>
+                        ToolTip="Tests provider endpoint/authentication/model catalog only. It does not test the selected model."
+                        Content="Test connection" Click="OnTestConnection" />
+                <Button x:Name="TestModelButton" Style="{StaticResource SetButton}" Margin="6,0,0,0"
+                        ToolTip="Sends a tiny synthetic text request to only the selected model. Provider usage limits and charges may apply."
+                        Content="Test model" Click="OnTestModel" />
+                <Button x:Name="VerifyModelsButton" Style="{StaticResource SetButton}" Margin="6,0,0,0"
+                        ToolTip="Tests detected models one at a time with a bounded synthetic text request. Stop at any time. Provider usage limits and charges may apply."
+                        Content="Verify models" Click="OnVerifyModels" />
+                <Button x:Name="CancelTestButton" Content="Stop" Click="OnCancelTest" Style="{StaticResource SetButton}" Visibility="Collapsed" Margin="6,4,0,0" />
+            </WrapPanel>
+            <CheckBox x:Name="WorkingModelsOnlyCheck" Visibility="Collapsed" Margin="0,6,0,0"
+                      Foreground="{DynamicResource B.Foreground}" Content="Show verified working models only"
+                      Checked="OnWorkingModelsFilterChanged" Unchecked="OnWorkingModelsFilterChanged" />
             <TextBlock x:Name="TestResultText" FontSize="11" Margin="0,6,0,0"
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
+            <ScrollViewer x:Name="ModelVerificationScroll" Visibility="Collapsed" MaxHeight="120"
+                          VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+                <TextBlock x:Name="ModelVerificationText" FontSize="10.5" TextWrapping="Wrap"
+                           Foreground="{DynamicResource B.ForegroundDim}" />
+            </ScrollViewer>
 
             <!-- ============ Local AI ============ -->
             <StackPanel x:Name="LocalProviderSection" Visibility="Collapsed">

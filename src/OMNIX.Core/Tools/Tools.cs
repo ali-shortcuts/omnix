@@ -32,17 +32,18 @@ namespace OMNIX.Core.Tools
         public const string InsertSlide = "insert_slide";
         public const string AddSpeakerNotes = "add_speaker_notes";
         public const string HighlightRange = "highlight_range";
+        public const string FormatRange = "format_range";
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
             SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage,
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange
         };
 
         private static readonly HashSet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal)
         {
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange
         };
 
         public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
@@ -117,6 +118,11 @@ namespace OMNIX.Core.Tools
             if (token == null) return fallback;
             string s = token.ToString();
             return s ?? fallback;
+        }
+
+        public JToken Token(string key)
+        {
+            return _obj[key];
         }
     }
 

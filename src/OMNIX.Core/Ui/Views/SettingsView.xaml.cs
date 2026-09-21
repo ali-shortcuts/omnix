@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,6 +26,9 @@ namespace OMNIX.Core.Ui
         private bool _loading;
         private string _displayedProviderId;
         private CancellationTokenSource _providerOperation;
+        private readonly List<string> _discoveredModels = new List<string>();
+        private readonly Dictionary<string, ModelVerificationResult> _modelVerification =
+            new Dictionary<string, ModelVerificationResult>(StringComparer.OrdinalIgnoreCase);
 
         private static readonly string[] AllowedOfficialHosts =
         {
@@ -76,6 +80,12 @@ namespace OMNIX.Core.Ui
                 ProviderCombo.ItemsSource = registry != null ? registry.All.Select(p => p.Info).OrderBy(p => p.Id == "custom" ? 0 : (p.Id == "ollama" || p.Id == "lmstudio" ? 2 : 1)).ToList() : null;
                 var selected = registry != null ? registry.Get(settings.SelectedProviderId) : null;
                 _displayedProviderId = selected != null ? selected.Info.Id : null;
+                _discoveredModels.Clear();
+                _modelVerification.Clear();
+                WorkingModelsOnlyCheck.IsChecked = false;
+                WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
+                ModelVerificationScroll.Visibility = Visibility.Collapsed;
+                ModelVerificationText.Text = "";
                 ModelCombo.ItemsSource = new[] { "Custom Model" };
                 ManualModelBox.Visibility = Visibility.Collapsed;
                 if (selected != null)
@@ -197,6 +207,12 @@ namespace OMNIX.Core.Ui
             if (info == null) return;
 
             CancelProviderOperation();
+            _discoveredModels.Clear();
+            _modelVerification.Clear();
+            WorkingModelsOnlyCheck.IsChecked = false;
+            WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
+            ModelVerificationScroll.Visibility = Visibility.Collapsed;
+            ModelVerificationText.Text = "";
             SaveDisplayedProviderFields();
             var settings = SettingsManager.Instance.Settings;
             _displayedProviderId = info.Id;
@@ -222,6 +238,9 @@ namespace OMNIX.Core.Ui
         {
             LoadModelsButton.IsEnabled = !busy;
             TestButton.IsEnabled = !busy;
+            TestModelButton.IsEnabled = !busy;
+            VerifyModelsButton.IsEnabled = !busy;
+            WorkingModelsOnlyCheck.IsEnabled = !busy;
             CancelTestButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             ModelCombo.IsEnabled = !busy;
             ApiKeyBox.IsEnabled = !busy;
@@ -327,15 +346,22 @@ namespace OMNIX.Core.Ui
                 if (!ReferenceEquals(_providerOperation, operation)) return;
                 if (models == null || models.Count == 0)
                 {
-                    TestResultText.Text = "The server returned no model catalog. You can enter a model ID and use Test Connection.";
+                    TestResultText.Text = "The server returned no model catalog. You can enter an exact model ID and use Test model.";
                     return;
                 }
                 string current = EffectiveModelId;
-                ModelCombo.ItemsSource = new[] { "Custom Model" }.Concat(ProviderDiagnostics.ModelOptions(models, current)).Distinct().ToList();
-                ModelCombo.Text = current; // Preserve a manually entered model ID.
+                _discoveredModels.Clear();
+                _discoveredModels.AddRange(models.Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
+                _modelVerification.Clear();
+                WorkingModelsOnlyCheck.IsChecked = false;
+                WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
+                ModelVerificationScroll.Visibility = Visibility.Collapsed;
+                ModelVerificationText.Text = "";
+                RefreshModelOptions(current);
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
-                TestResultText.Text = models.Count + " models found. Select one or enter an ID.";
+                TestResultText.Text = models.Count + " models detected. Detection is only a catalog result; use Test model or Verify models to prove inference.";
             }
             catch (OmnixException ex)
             {
@@ -373,43 +399,236 @@ namespace OMNIX.Core.Ui
             if (info == null) return;
 
             SaveProviderFields();
-            SaveGeneralFields();
-            SettingsManager.Instance.Save();
             var operation = BeginProviderOperation(30);
             TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
-            TestResultText.Text = "Testing…";
+            TestResultText.Text = "Testing provider connection/authentication without a model…";
             try
             {
                 var adapter = new ProviderRegistry().Get(info.Id);
                 if (adapter == null) return;
-                await ProviderDiagnostics.TestSyntheticModelAsync(adapter, gateway.Router.BuildCredentials(info.Id), operation.Token);
+                var credentials = gateway.Router.BuildCredentials(info.Id);
+                var result = await ProviderDiagnostics.TestConnectionOnlyAsync(adapter, credentials, operation.Token);
                 if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = "Connected. Text response received. Vision not tested.";
-                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
-            }
-            catch (OmnixException ex)
-            {
-                if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = ex.Message;
-                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+
+                TestResultText.Text = result.Summary + " (" + result.LatencyMs + " ms)";
+                if (result.State == ConnectionDiagnosticState.Connected)
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
+                else if (result.EndpointReachable)
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+                else
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
             }
             catch (OperationCanceledException)
             {
-                if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = Errors.ErrorPresenter.Format(OmnixException.Timeout(info.DisplayName + " connection test timed out."));
-                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                if (ReferenceEquals(_providerOperation, operation))
+                {
+                    TestResultText.Text = "Connection test cancelled or timed out. No model was tested.";
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                }
             }
             catch (Exception ex)
             {
-                Logger.Error("ui", "TestConnection failed", ex);
-                if (!ReferenceEquals(_providerOperation, operation)) return;
-                TestResultText.Text = Localization.Strings.T("S.Settings.TestFailed") + " — " + ex.Message;
-                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                Logger.Error("ui", "Connection test failed", ex);
+                if (ReferenceEquals(_providerOperation, operation))
+                {
+                    TestResultText.Text = ErrorPresenter.Format(ex);
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                }
             }
             finally
             {
                 EndProviderOperation(operation);
             }
+        }
+
+        private async void OnTestModel(object sender, RoutedEventArgs e)
+        {
+            try { await OfficeUi.RunAsync(Dispatcher, OnTestModelCore); }
+            catch (Exception ex) { Logger.Error("ui", "Settings operation failed", ex); }
+        }
+
+        private async Task OnTestModelCore()
+        {
+            var gateway = Gateway;
+            if (gateway == null) return;
+            var info = ProviderCombo.SelectedItem as ProviderInfo;
+            if (info == null) return;
+
+            SaveProviderFields();
+            string model = EffectiveModelId;
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                TestResultText.Text = "Select or enter a model ID first. Test connection does not require a model; Test model does.";
+                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                return;
+            }
+
+            var operation = BeginProviderOperation(35);
+            TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+            TestResultText.Text = "Testing model '" + model + "' with a tiny document-free text request…";
+            try
+            {
+                var credentials = gateway.Router.BuildCredentials(info.Id);
+                credentials.Model = model;
+                var result = await ProviderDiagnostics.TestSelectedModelAsync(info.Id, credentials, operation.Token);
+                if (!ReferenceEquals(_providerOperation, operation)) return;
+
+                _modelVerification[model] = result;
+                RenderVerificationSummary(1, 1);
+                WorkingModelsOnlyCheck.Visibility = Visibility.Visible;
+                ModelVerificationScroll.Visibility = Visibility.Visible;
+                TestResultText.Text = model + ": " + result.Summary;
+                TestResultText.SetResourceReference(TextBlock.ForegroundProperty,
+                    result.Working ? "B.Success" : "B.Danger");
+            }
+            catch (OperationCanceledException)
+            {
+                if (ReferenceEquals(_providerOperation, operation))
+                {
+                    TestResultText.Text = "Model test cancelled or timed out.";
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                }
+            }
+            finally
+            {
+                EndProviderOperation(operation);
+            }
+        }
+
+        private async void OnVerifyModels(object sender, RoutedEventArgs e)
+        {
+            try { await OfficeUi.RunAsync(Dispatcher, OnVerifyModelsCore); }
+            catch (Exception ex) { Logger.Error("ui", "Settings operation failed", ex); }
+        }
+
+        private async Task OnVerifyModelsCore()
+        {
+            var gateway = Gateway;
+            if (gateway == null) return;
+            var info = ProviderCombo.SelectedItem as ProviderInfo;
+            if (info == null) return;
+
+            if (_discoveredModels.Count == 0)
+            {
+                TestResultText.Text = "Detect models first. Verification tests only the catalog returned for this exact provider/API configuration.";
+                TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
+                return;
+            }
+
+            SaveProviderFields();
+            var operation = BeginProviderOperation(300);
+            _modelVerification.Clear();
+            WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
+            ModelVerificationScroll.Visibility = Visibility.Visible;
+            ModelVerificationText.Text = "";
+            TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+            TestResultText.Text = "Verifying detected models one at a time. Stop is available; each model has a bounded timeout.";
+
+            try
+            {
+                var credentials = gateway.Router.BuildCredentials(info.Id);
+                var results = await ProviderDiagnostics.VerifyModelsAsync(
+                    info.Id,
+                    credentials,
+                    _discoveredModels,
+                    (result, completed, total) =>
+                    {
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (!ReferenceEquals(_providerOperation, operation)) return;
+                            _modelVerification[result.ModelId] = result;
+                            RenderVerificationSummary(completed, total);
+                        }));
+                    },
+                    operation.Token);
+
+                if (!ReferenceEquals(_providerOperation, operation)) return;
+                foreach (var result in results) _modelVerification[result.ModelId] = result;
+                RenderVerificationSummary(results.Count, Math.Min(100, _discoveredModels.Count));
+                WorkingModelsOnlyCheck.Visibility = Visibility.Visible;
+
+                int working = results.Count(x => x.Working);
+                TestResultText.Text = "Verification complete: " + working + " working of " + results.Count +
+                                      " tested model" + (results.Count == 1 ? "" : "s") + ".";
+                TestResultText.SetResourceReference(TextBlock.ForegroundProperty,
+                    working > 0 ? "B.Success" : "B.Danger");
+                RefreshModelOptions(EffectiveModelId);
+            }
+            catch (OperationCanceledException)
+            {
+                if (ReferenceEquals(_providerOperation, operation))
+                {
+                    TestResultText.Text = "Model verification stopped. Completed results were kept for this Settings view.";
+                    TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+                    WorkingModelsOnlyCheck.Visibility = _modelVerification.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+                    RenderVerificationSummary(_modelVerification.Count, Math.Min(100, _discoveredModels.Count));
+                }
+            }
+            finally
+            {
+                EndProviderOperation(operation);
+            }
+        }
+
+        private void OnWorkingModelsFilterChanged(object sender, RoutedEventArgs e)
+        {
+            if (_loading) return;
+            RefreshModelOptions(EffectiveModelId);
+        }
+
+        private void RefreshModelOptions(string current)
+        {
+            IEnumerable<string> source = _discoveredModels;
+            if (WorkingModelsOnlyCheck.IsChecked == true)
+                source = source.Where(id =>
+                {
+                    ModelVerificationResult result;
+                    return _modelVerification.TryGetValue(id, out result) && result.Working;
+                });
+
+            string catalogCurrent = WorkingModelsOnlyCheck.IsChecked == true ? null : current;
+            var options = new[] { "Custom Model" }
+                .Concat(ProviderDiagnostics.ModelOptions(source, catalogCurrent))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            ModelCombo.ItemsSource = options;
+            // The editable text is preserved even if the working-only dropdown hides this ID.
+            // This avoids silently changing the user's configured model.
+            ModelCombo.Text = current ?? "";
+        }
+
+        private void RenderVerificationSummary(int completed, int total)
+        {
+            var ordered = _modelVerification.Values
+                .OrderByDescending(x => x.Working)
+                .ThenBy(x => x.ModelId, StringComparer.OrdinalIgnoreCase)
+                .Take(100)
+                .ToList();
+
+            int working = ordered.Count(x => x.Working);
+            int denied = ordered.Count(x => x.State == ModelVerificationState.AccessDenied);
+            int unavailable = ordered.Count(x => x.State == ModelVerificationState.NotFoundOrUnavailable);
+            int limited = ordered.Count(x => x.State == ModelVerificationState.RateLimited);
+            int incompatible = ordered.Count(x => x.State == ModelVerificationState.Incompatible);
+            int timedOut = ordered.Count(x => x.State == ModelVerificationState.TimedOut);
+
+            var lines = new List<string>
+            {
+                "Progress " + completed + "/" + total + " · working=" + working +
+                " · denied=" + denied + " · unavailable=" + unavailable +
+                " · rate-limited=" + limited + " · incompatible=" + incompatible +
+                " · timeout=" + timedOut
+            };
+            foreach (var result in ordered.Take(20))
+            {
+                string mark = result.Working ? "✓" : "×";
+                lines.Add(mark + " " + result.ModelId + " — " + result.State +
+                          (result.LatencyMs > 0 ? " · " + result.LatencyMs + " ms" : ""));
+            }
+            if (ordered.Count > 20) lines.Add("… " + (ordered.Count - 20) + " more tested models");
+
+            ModelVerificationText.Text = string.Join(Environment.NewLine, lines);
+            ModelVerificationScroll.Visibility = ordered.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private async void OnProbeLocal(object sender, RoutedEventArgs e)

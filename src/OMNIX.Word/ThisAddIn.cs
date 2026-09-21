@@ -21,6 +21,7 @@ namespace OMNIX.Word
 
         internal WordHostAdapter Adapter { get; private set; }
         internal WordTaskPaneService Panes { get; private set; }
+        internal OmnixRibbon Ribbon { get; private set; }
 
         internal static AiGateway SharedGateway;
         internal static ChatHistoryStore SharedHistory;
@@ -40,6 +41,8 @@ namespace OMNIX.Word
 
             Adapter = new WordHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
+
+            if (Ribbon != null) Ribbon.BindAdapterIfReady();
 
             EnsureSharedServices();
 
@@ -104,7 +107,8 @@ namespace OMNIX.Word
         protected override Office.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
             Logger.Startup("CreateRibbonExtensibilityObject -> OmnixRibbon");
-            return new OmnixRibbon(this);
+            Ribbon = new OmnixRibbon(this);
+            return Ribbon;
         }
 
         #region VSTO generated code

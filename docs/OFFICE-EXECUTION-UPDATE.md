@@ -39,8 +39,32 @@ Windows build/runtime acceptance must pass before publishing an installer. GitHu
   Parsing remains data-only: no reflection/eval is used, only one call is accepted, and
   the normal whitelist, scope guard and write confirmation still apply.
 - Provider-native tool protocol markers are filtered from streaming UI output.
-- Chat includes a persistent Live activity panel showing real request/tool phases and
-  friendly Office targets (for example a worksheet or cell) without exposing internal JSON.
-  It never pretends to click a Ribbon control that was not actually invoked.
+- Chat no longer contains a Live activity timeline. Execution visibility belongs in the Office
+  application itself.
+- Excel/Word/PowerPoint host adapters implement visible execution: OMNIX activates the relevant
+  native Ribbon tab when possible and brings the real worksheet/range, Word range, or slide/shape
+  into view before/after the actual operation. Object-model writes are never misrepresented as
+  fake Ribbon-button clicks.
+- The system prompt is rebuilt from live Office context before every provider/tool turn, so after
+  a sheet/selection/slide change the model is explicitly reminded that it is operating through
+  OMNIX inside the current Excel/Word/PowerPoint document.
 - Learn now has a local English/Persian selector. This changes the reference presentation
   only; installer and provider/settings behavior are unchanged.
+
+
+## Provider/model diagnostics separation
+
+Settings now treats provider connectivity and model inference as different facts:
+
+- **Test connection** performs a model-independent authenticated catalog/endpoint check. It never
+  sends a chat request and never fails merely because the selected model is unavailable.
+- **Detect models** retrieves the provider-advertised catalog only; discovery is not presented as
+  proof that inference works.
+- **Test model** sends one tiny document-free synthetic text request to the exact selected model.
+- **Verify models** tests detected models sequentially with an isolated adapter and per-model timeout,
+  classifying working, access-denied, unavailable, rate/quota-limited, incompatible, timeout and
+  network failures. The user can stop the verification and filter the dropdown to verified-working
+  catalog entries.
+- Custom-provider 404 on `/models` is reported as a reachable endpoint with unavailable catalog,
+  rather than being mislabeled as failure of the selected model.
+

@@ -25,8 +25,17 @@ namespace OMNIX.Core.AiGateway.Adapters
             if(string.IsNullOrWhiteSpace(_credentials.Model)) throw Errors.OmnixException.Model("Select a model first.");
             return _client.SendAsync(request,_credentials.ApiKey,_credentials.Model,onDelta,ct);
         }
-        public async Task<bool> TestConnectionAsync(CancellationToken ct) {
-            await ProviderDiagnostics.TestSyntheticModelAsync(this,_credentials,ct).ConfigureAwait(false); return true;
+        public async Task<bool> TestConnectionAsync(CancellationToken ct)
+        {
+            try
+            {
+                var models = await ListModelsAsync(ct).ConfigureAwait(false);
+                return models != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
         public bool SupportsVisionNow() { return false; } // Text-tested presets; no unverified vision claim.
     }

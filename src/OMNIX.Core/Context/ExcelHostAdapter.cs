@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Excel = Microsoft.Office.Interop.Excel;
+using Office = Microsoft.Office.Core;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Tools;
 using OMNIX.Core.Util;
@@ -18,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -27,6 +28,7 @@ namespace OMNIX.Core.Context
         private readonly Excel.Application _app;
         private readonly Func<int> _maxCells;
         private readonly Func<int> _maxChars;
+        private Office.IRibbonUI _ribbonUi;
 
         public ExcelHostAdapter(Excel.Application app, Func<int> maxCells, Func<int> maxChars)
         {
@@ -37,6 +39,127 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
+
+        public string CapabilitySummary
+        {
+            get
+            {
+                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, typed cell values, formulas, range highlighting, and bounded professional range formatting (font, alignment, number format, wrap, fill, border and AutoFit). Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
+            }
+        }
+
+        public void BindRibbon(Office.IRibbonUI ribbonUi) { _ribbonUi = ribbonUi; }
+
+        public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
+        {
+            ActivateRelevantRibbonTab(toolName);
+            var wb = _app.ActiveWorkbook;
+            if (wb == null) return;
+
+            try
+            {
+                if (toolName == ToolNames.ReadDocumentSection)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    if (string.IsNullOrWhiteSpace(sheetName)) return;
+                    var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws == null) return;
+                    int row = args.Integer("row", 1, 1, 1048576);
+                    int col = args.Integer("column", 1, 1, 16384);
+                    int rows = args.Integer("rows", 10, 1, 100);
+                    int cols = args.Integer("columns", 8, 1, 32);
+                    ShowRange(((Excel.Range)ws.Cells[row, col]).Resize[rows, cols]);
+                    return;
+                }
+
+                if (toolName == ToolNames.WriteToCell || toolName == ToolNames.InsertFormula ||
+                    toolName == ToolNames.HighlightRange || toolName == ToolNames.FormatRange)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    var ws = string.IsNullOrWhiteSpace(sheetName)
+                        ? _app.ActiveSheet as Excel.Worksheet
+                        : wb.Worksheets[sheetName] as Excel.Worksheet;
+                    string address = args.Get("address", args.Get("range", ""));
+                    if (ws != null && !string.IsNullOrWhiteSpace(address))
+                        ShowRange(ws.Range[address]);
+                    return;
+                }
+
+                if (toolName == ToolNames.CreateDataTable && stage == OfficeExecutionStage.Verify)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    if (string.IsNullOrWhiteSpace(sheetName)) return;
+                    var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws == null) return;
+                    ws.Activate();
+                    Excel.Range target = null;
+                    try
+                    {
+                        if (ws.ListObjects.Count > 0) target = ws.ListObjects[1].Range;
+                    }
+                    catch { }
+                    if (target == null) target = ws.UsedRange;
+                    if (target != null) ShowRange(target);
+                    return;
+                }
+
+                if (toolName == ToolNames.CaptureChartAsImage)
+                {
+                    string chartName = args.Get("chart", "");
+                    var ws = _app.ActiveSheet as Excel.Worksheet;
+                    if (ws == null) return;
+                    foreach (Excel.ChartObject chart in (Excel.ChartObjects)ws.ChartObjects())
+                    {
+                        if (string.IsNullOrWhiteSpace(chartName) ||
+                            string.Equals(chart.Name, chartName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            chart.Activate();
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("ui", "Excel visible execution target reveal failed", ex);
+            }
+        }
+
+        private void ActivateRelevantRibbonTab(string toolName)
+        {
+            string tab = null;
+            switch (toolName)
+            {
+                case ToolNames.InsertFormula: tab = "TabFormulas"; break;
+                case ToolNames.CreateDataTable: tab = "TabInsert"; break;
+                case ToolNames.ReadDocumentMap:
+                case ToolNames.ReadDocumentSection: tab = "TabData"; break;
+                case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
+                case ToolNames.WriteToCell:
+                case ToolNames.HighlightRange:
+                case ToolNames.ReadSelection:
+                case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+            }
+            if (tab == null || _ribbonUi == null) return;
+            try { _ribbonUi.ActivateTabMso(tab); }
+            catch { }
+        }
+
+        private void ShowRange(Excel.Range range)
+        {
+            if (range == null) return;
+            try
+            {
+                var ws = range.Worksheet as Excel.Worksheet;
+                if (ws != null) ws.Activate();
+                _app.Goto(range, true);
+                range.Select();
+            }
+            catch
+            {
+                try { range.Select(); } catch { }
+            }
+        }
 
         public OfficeContext ReadContext()
         {
@@ -307,6 +430,7 @@ namespace OMNIX.Core.Context
                 case ToolNames.WriteToCell:
                 case ToolNames.InsertFormula:
                 case ToolNames.HighlightRange:
+                case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
@@ -515,6 +639,7 @@ namespace OMNIX.Core.Context
         private const int ExcelCellTextLimit = 32767;
         private const int ExcelFormulaLengthLimit = 8192;
         private const int MaxHighlightCells = 10000;
+        private const int MaxFormatCells = 10000;
         private const int MaxAddressChars = 128;
 
         public static WritePreview Prepare(ExcelHostAdapter adapter, string toolName, string argumentsJson)
@@ -532,6 +657,15 @@ namespace OMNIX.Core.Context
                 catch { old = "(mixed/unknown)"; }
                 before = "Target " + target.Address[false, false] + " current Interior.ColorIndex: " + old;
             }
+            else if (toolName == ToolNames.FormatRange)
+            {
+                string numberFormat = "(mixed/unknown)";
+                string fontName = "(mixed/unknown)";
+                try { numberFormat = Convert.ToString(target.NumberFormat); } catch { }
+                try { fontName = Convert.ToString(target.Font.Name); } catch { }
+                before = "Target " + target.Address[false, false] + " (" + GetCellCount(target) +
+                         " cells); current font=" + fontName + "; numberFormat=" + numberFormat;
+            }
             else
             {
                 object current = toolName == ToolNames.InsertFormula ? target.Formula : target.Value2;
@@ -541,9 +675,15 @@ namespace OMNIX.Core.Context
 
             string after;
             if (toolName == ToolNames.WriteToCell)
-                after = target.Address[false, false] + " will contain: " + TextUtil.Truncate(args.Get("value", ""), 2000);
+            {
+                var valueToken = args.Token("value");
+                string previewValue = valueToken == null ? "" : valueToken.ToString(Newtonsoft.Json.Formatting.None);
+                after = target.Address[false, false] + " will contain: " + TextUtil.Truncate(previewValue, 2000);
+            }
             else if (toolName == ToolNames.InsertFormula)
                 after = target.Address[false, false] + " formula will be: " + TextUtil.Truncate(args.Get("formula", args.Get("value", "")), 2000);
+            else if (toolName == ToolNames.FormatRange)
+                after = target.Address[false, false] + " (" + GetCellCount(target) + " cells) formatting: " + DescribeFormatting(args);
             else
                 after = target.Address[false, false] + " (" + GetCellCount(target) + " cells) will be highlighted yellow.";
 
@@ -567,7 +707,7 @@ namespace OMNIX.Core.Context
             switch (toolName)
             {
                 case ToolNames.WriteToCell:
-                    target.Value2 = args.Get("value", "");
+                    ApplyTypedCellValue(target, args.Token("value"));
                     break;
                 case ToolNames.InsertFormula:
                     target.NumberFormat = "General";
@@ -577,6 +717,9 @@ namespace OMNIX.Core.Context
                     break;
                 case ToolNames.HighlightRange:
                     target.Interior.Color = 0x3BEBFF;
+                    break;
+                case ToolNames.FormatRange:
+                    ApplyFormatting(target, args);
                     break;
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR, "Unknown Excel write tool: " + toolName, "", "");
@@ -644,25 +787,42 @@ namespace OMNIX.Core.Context
                         toolName + " resolved to " + cells + " cells.",
                         "Use write_to_cell/insert_formula for one cell at a time, or ask for a smaller explicit change.");
             }
-            else if (toolName == ToolNames.HighlightRange)
+            else if (toolName == ToolNames.HighlightRange || toolName == ToolNames.FormatRange)
             {
                 int configuredCap = Math.Max(1, adapter.MaxCells);
-                long cap = Math.Min(MaxHighlightCells, configuredCap);
+                long hardCap = toolName == ToolNames.FormatRange ? MaxFormatCells : MaxHighlightCells;
+                long cap = Math.Min(hardCap, configuredCap);
                 if (cells > cap)
                     throw new OmnixException(ErrorCode.CORE_ERROR,
-                        "Highlight range is too large for one AI-approved mutation.",
+                        (toolName == ToolNames.FormatRange ? "Format" : "Highlight") + " range is too large for one AI-approved mutation.",
                         "Requested " + cells + " cells; limit=" + cap + ".",
                         "Use a smaller contiguous range and approve it separately.");
+                if (toolName == ToolNames.FormatRange) ValidateFormattingArgs(args);
             }
 
             if (toolName == ToolNames.WriteToCell)
             {
-                string value = args.Get("value", "") ?? "";
-                if (value.Length > ExcelCellTextLimit)
+                var valueToken = args.Token("value");
+                if (valueToken != null && valueToken.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                {
+                    string value = valueToken.ToString();
+                    if (value.Length > ExcelCellTextLimit)
+                        throw new OmnixException(ErrorCode.CORE_ERROR,
+                            "Cell value is too large for Excel.",
+                            "write_to_cell length=" + value.Length + "; Excel limit=" + ExcelCellTextLimit + ".",
+                            "Shorten the value or split it across cells deliberately.");
+                }
+                else if (valueToken != null &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Integer &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Float &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Boolean &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Null)
+                {
                     throw new OmnixException(ErrorCode.CORE_ERROR,
-                        "Cell value is too large for Excel.",
-                        "write_to_cell length=" + value.Length + "; Excel limit=" + ExcelCellTextLimit + ".",
-                        "Shorten the value or split it across cells deliberately.");
+                        "write_to_cell accepts only text, number, boolean or null.",
+                        "Unsupported JSON value type=" + valueToken.Type,
+                        "Use create_data_table for structured multi-cell data.");
+                }
             }
             else if (toolName == ToolNames.InsertFormula)
             {
@@ -678,6 +838,186 @@ namespace OMNIX.Core.Context
             }
 
             return target;
+        }
+
+        private static void ApplyTypedCellValue(Excel.Range target, Newtonsoft.Json.Linq.JToken token)
+        {
+            if (token == null || token.Type == Newtonsoft.Json.Linq.JTokenType.Null)
+            {
+                target.Value2 = null;
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.String)
+            {
+                target.NumberFormat = "@";
+                target.Value2 = token.ToString();
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+            {
+                target.Value2 = (bool)token;
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.Integer ||
+                token.Type == Newtonsoft.Json.Linq.JTokenType.Float)
+            {
+                double value = Convert.ToDouble(token, System.Globalization.CultureInfo.InvariantCulture);
+                if (double.IsNaN(value) || double.IsInfinity(value))
+                    throw new InvalidOperationException("Numeric cell values must be finite.");
+                target.Value2 = value;
+                return;
+            }
+
+            throw new InvalidOperationException("Unsupported cell value type.");
+        }
+
+        private static string DescribeFormatting(ToolArguments args)
+        {
+            var items = new List<string>();
+            AddIf(items, "font", args.Get("fontName", ""));
+            AddIf(items, "fontSize", args.Get("fontSize", ""));
+            AddIf(items, "bold", args.Get("bold", ""));
+            AddIf(items, "italic", args.Get("italic", ""));
+            AddIf(items, "underline", args.Get("underline", ""));
+            AddIf(items, "fontColor", args.Get("fontColor", ""));
+            AddIf(items, "fillColor", args.Get("fillColor", ""));
+            AddIf(items, "horizontal", args.Get("horizontalAlignment", ""));
+            AddIf(items, "vertical", args.Get("verticalAlignment", ""));
+            AddIf(items, "numberFormat", args.Get("numberFormat", ""));
+            AddIf(items, "wrapText", args.Get("wrapText", ""));
+            AddIf(items, "border", args.Get("border", ""));
+            AddIf(items, "autofitColumns", args.Get("autofitColumns", ""));
+            AddIf(items, "autofitRows", args.Get("autofitRows", ""));
+            return items.Count == 0 ? "(no formatting properties supplied)" : string.Join(", ", items);
+        }
+
+        private static void AddIf(List<string> items, string label, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) items.Add(label + "=" + value);
+        }
+
+        private static void ValidateFormattingArgs(ToolArguments args)
+        {
+            string fontName = args.Get("fontName", "");
+            if (fontName.Length > 80)
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Font name is too long.", "format_range fontName", "Use a normal installed font name.");
+
+            string fontSize = args.Get("fontSize", "");
+            if (!string.IsNullOrWhiteSpace(fontSize))
+            {
+                double size;
+                if (!double.TryParse(fontSize, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out size) || size < 6 || size > 72)
+                    throw new OmnixException(ErrorCode.CORE_ERROR, "Font size must be between 6 and 72.", "format_range fontSize", "Use a normal Office font size.");
+            }
+
+            ValidateOptionalBool(args, "bold");
+            ValidateOptionalBool(args, "italic");
+            ValidateOptionalBool(args, "underline");
+            ValidateOptionalBool(args, "wrapText");
+            ValidateOptionalBool(args, "autofitColumns");
+            ValidateOptionalBool(args, "autofitRows");
+
+            string numberFormat = args.Get("numberFormat", "");
+            if (numberFormat.Length > 100)
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Number format is too long.", "format_range numberFormat", "Use a concise Excel number format.");
+
+            ValidateAlignment(args.Get("horizontalAlignment", ""), true);
+            ValidateAlignment(args.Get("verticalAlignment", ""), false);
+            ValidateColor(args.Get("fontColor", ""));
+            ValidateColor(args.Get("fillColor", ""));
+
+            string border = args.Get("border", "");
+            if (!string.IsNullOrWhiteSpace(border) &&
+                !string.Equals(border, "none", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(border, "thin", StringComparison.OrdinalIgnoreCase))
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Border must be 'none' or 'thin'.", "format_range border", "Use a supported professional border style.");
+        }
+
+        private static void ValidateOptionalBool(ToolArguments args, string key)
+        {
+            string raw = args.Get(key, "");
+            bool parsed;
+            if (!string.IsNullOrWhiteSpace(raw) && !bool.TryParse(raw, out parsed))
+                throw new OmnixException(ErrorCode.CORE_ERROR, key + " must be true or false.", "format_range " + key, "Use a JSON boolean.");
+        }
+
+        private static void ValidateAlignment(string raw, bool horizontal)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            string value = raw.Trim().ToLowerInvariant();
+            string[] allowed = horizontal
+                ? new[] { "general", "left", "center", "right" }
+                : new[] { "top", "center", "bottom" };
+            if (!allowed.Contains(value))
+                throw new OmnixException(ErrorCode.CORE_ERROR,
+                    (horizontal ? "Horizontal" : "Vertical") + " alignment is unsupported.",
+                    "format_range alignment=" + raw,
+                    "Use " + string.Join(", ", allowed) + ".");
+        }
+
+        private static void ValidateColor(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            string value = raw.Trim();
+            if (value.Length != 7 || value[0] != '#' ||
+                !value.Substring(1).All(ch => Uri.IsHexDigit(ch)))
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Colors must use #RRGGBB.", "format_range color=" + raw, "Use a six-digit RGB color.");
+        }
+
+        private static void ApplyFormatting(Excel.Range target, ToolArguments args)
+        {
+            ValidateFormattingArgs(args);
+
+            string fontName = args.Get("fontName", "");
+            if (!string.IsNullOrWhiteSpace(fontName)) target.Font.Name = fontName;
+
+            string fontSize = args.Get("fontSize", "");
+            if (!string.IsNullOrWhiteSpace(fontSize))
+                target.Font.Size = double.Parse(fontSize, System.Globalization.CultureInfo.InvariantCulture);
+
+            bool value;
+            if (bool.TryParse(args.Get("bold", ""), out value)) target.Font.Bold = value;
+            if (bool.TryParse(args.Get("italic", ""), out value)) target.Font.Italic = value;
+            if (bool.TryParse(args.Get("underline", ""), out value))
+                target.Font.Underline = value ? Excel.XlUnderlineStyle.xlUnderlineStyleSingle : Excel.XlUnderlineStyle.xlUnderlineStyleNone;
+            if (bool.TryParse(args.Get("wrapText", ""), out value)) target.WrapText = value;
+
+            string fontColor = args.Get("fontColor", "");
+            if (!string.IsNullOrWhiteSpace(fontColor))
+                target.Font.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.ColorTranslator.FromHtml(fontColor));
+            string fillColor = args.Get("fillColor", "");
+            if (!string.IsNullOrWhiteSpace(fillColor))
+                target.Interior.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.ColorTranslator.FromHtml(fillColor));
+
+            string numberFormat = args.Get("numberFormat", "");
+            if (!string.IsNullOrWhiteSpace(numberFormat)) target.NumberFormat = numberFormat;
+
+            string h = args.Get("horizontalAlignment", "").Trim().ToLowerInvariant();
+            if (h == "general") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignGeneral;
+            else if (h == "left") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignLeft;
+            else if (h == "center") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignCenter;
+            else if (h == "right") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignRight;
+
+            string v = args.Get("verticalAlignment", "").Trim().ToLowerInvariant();
+            if (v == "top") target.VerticalAlignment = Excel.XlVAlign.xlVAlignTop;
+            else if (v == "center") target.VerticalAlignment = Excel.XlVAlign.xlVAlignCenter;
+            else if (v == "bottom") target.VerticalAlignment = Excel.XlVAlign.xlVAlignBottom;
+
+            string border = args.Get("border", "").Trim().ToLowerInvariant();
+            if (border == "none")
+                target.Borders.LineStyle = Excel.XlLineStyle.xlLineStyleNone;
+            else if (border == "thin")
+            {
+                target.Borders.LineStyle = Excel.XlLineStyle.xlContinuous;
+                target.Borders.Weight = Excel.XlBorderWeight.xlThin;
+            }
+
+            if (bool.TryParse(args.Get("autofitColumns", ""), out value) && value) target.Columns.AutoFit();
+            if (bool.TryParse(args.Get("autofitRows", ""), out value) && value) target.Rows.AutoFit();
         }
 
         private static long GetCellCount(Excel.Range target)

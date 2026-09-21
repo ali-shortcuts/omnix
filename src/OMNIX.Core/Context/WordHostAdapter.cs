@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Word = Microsoft.Office.Interop.Word;
+using Office = Microsoft.Office.Core;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Tools;
 using OMNIX.Core.Util;
@@ -15,7 +16,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -23,6 +24,7 @@ namespace OMNIX.Core.Context
 
         private readonly Word.Application _app;
         private readonly Func<int> _maxChars;
+        private Office.IRibbonUI _ribbonUi;
 
         public WordHostAdapter(Word.Application app, Func<int> maxChars)
         {
@@ -32,6 +34,77 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.Word; } }
         public string HostDisplayName { get { return "Word"; } }
+
+        public string CapabilitySummary
+        {
+            get
+            {
+                return "Word direct object-model access: document/selection text, paragraphs/headings/tables metadata, main text plus available headers/footers/comments/footnotes/endnotes/text-frame stories, current-view capture, and confirmed rewrite of the exact selected range with native UndoRecord. OMNIX visibly navigates to the real Word range and activates the relevant native Ribbon tab when possible.";
+            }
+        }
+
+        public void BindRibbon(Office.IRibbonUI ribbonUi) { _ribbonUi = ribbonUi; }
+
+        public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
+        {
+            ActivateRelevantRibbonTab(toolName);
+            try
+            {
+                var win = _app.ActiveWindow;
+                if (win == null) return;
+
+                if (toolName == ToolNames.ReadDocumentSection)
+                {
+                    var doc = _app.ActiveDocument;
+                    if (doc == null) return;
+                    string storyName = args.Get("story", "main");
+                    Word.Range story = ResolveStoryRange(doc, storyName);
+                    int start = args.Integer("start", story.Start, story.Start, story.End);
+                    int count = args.Integer("count", 4000, 1, 4000);
+                    Word.Range part = story.Duplicate;
+                    part.Start = start;
+                    part.End = Math.Min(story.End, start + count);
+                    try
+                    {
+                        part.Select();
+                        win.ScrollIntoView(part, true);
+                    }
+                    finally
+                    {
+                        try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(part); } catch { }
+                    }
+                    return;
+                }
+
+                if (toolName == ToolNames.RewriteSelectedText || toolName == ToolNames.ReadSelection ||
+                    toolName == ToolNames.CaptureCurrentViewAsImage)
+                {
+                    var sel = _app.Selection;
+                    if (sel != null && sel.Range != null)
+                        win.ScrollIntoView(sel.Range, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("ui", "Word visible execution target reveal failed", ex);
+            }
+        }
+
+        private void ActivateRelevantRibbonTab(string toolName)
+        {
+            string tab = null;
+            switch (toolName)
+            {
+                case ToolNames.RewriteSelectedText:
+                case ToolNames.ReadSelection: tab = "TabHome"; break;
+                case ToolNames.ReadDocumentMap:
+                case ToolNames.ReadDocumentSection:
+                case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+            }
+            if (tab == null || _ribbonUi == null) return;
+            try { _ribbonUi.ActivateTabMso(tab); }
+            catch { }
+        }
 
         public OfficeContext ReadContext()
         {

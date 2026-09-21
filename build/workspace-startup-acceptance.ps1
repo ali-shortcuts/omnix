@@ -85,6 +85,13 @@ class WorkspaceStartupRegression {
             editor.Text="edited-model-id";
             Check(model.Text=="edited-model-id","Editable model binding failed");
             Contrast(editor.Foreground,editor.Background);
+            var connectionButton=(Button)settings.FindName("TestButton");
+            var modelButton=(Button)settings.FindName("TestModelButton");
+            var verifyButton=(Button)settings.FindName("VerifyModelsButton");
+            Check(connectionButton!=null && (string)connectionButton.Content=="Test connection","Separate connection-test control missing");
+            Check(modelButton!=null && (string)modelButton.Content=="Test model","Separate model-test control missing");
+            Check(verifyButton!=null && (string)verifyButton.Content=="Verify models","Catalog verification control missing");
+            Check(view.Chat.FindName("ActivityBorder")==null,"Chat live-activity panel must not exist; execution belongs in Office");
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
@@ -127,7 +134,10 @@ class WorkspaceStartupRegression {
             Check(rejected,"Invalid table plan accepted");
         }
         string prompt=SystemPromptBuilder.Build(host,host.ReadContext());
-        Check(prompt.Contains("ACTIVE OFFICE HOST: Excel") && prompt.Contains("read_document_section") && prompt.Contains("create_data_table"),"Host capabilities missing from prompt");
+        Check(prompt.Contains("RUNTIME IDENTITY") && prompt.Contains("ACTIVE OFFICE HOST: Excel") &&
+              prompt.Contains("read_document_section") && prompt.Contains("create_data_table") &&
+              prompt.Contains("format_range"),"Professional host capabilities/runtime identity missing from prompt");
+        Check(ToolNames.IsWhitelisted(ToolNames.FormatRange) && ToolNames.IsWriteTool(ToolNames.FormatRange),"format_range must remain inside confirmed write boundary");
         Check(!prompt.Contains("rewrite_selected_text {text}"),"Foreign host write tool advertised");
         using(var controller=new WorkspaceController(host,new ChatHistoryStore())) {
             var method=typeof(WorkspaceController).GetMethod("RunOnUiThread",BindingFlags.Instance|BindingFlags.NonPublic).MakeGenericMethod(typeof(bool));

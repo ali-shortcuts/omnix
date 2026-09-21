@@ -77,41 +77,7 @@ namespace OMNIX.Core.AiGateway.Adapters
             try
             {
                 var models = await ListModelsAsync(ct).ConfigureAwait(false);
-                bool ok = models != null && models.Count > 0;
-                if (ok)
-                {
-                    try
-                    {
-                        byte[] png = Convert.FromBase64String(
-                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
-                        var probe = new ChatRequest
-                        {
-                            UserTurn = new ChatTurn
-                            {
-                                Role = ChatRole.User,
-                                Text = "Reply with OK.",
-                                Images = new List<ImageAttachment>
-                                {
-                                    new ImageAttachment { PngBytes = png, FileName = "probe.png" }
-                                },
-                                TimestampUtc = DateTime.UtcNow
-                            }
-                        };
-                        var resp = await ActiveClient().SendAsync(probe,
-                            _creds != null ? _creds.ApiKey : null,
-                            _creds != null ? _creds.Model : Info.DefaultModel,
-                            null, ct).ConfigureAwait(false);
-                        _visionProbeResult = resp != null && resp.Text != null;
-                    }
-                    catch
-                    {
-                        _visionProbeResult = false;
-                    }
-
-                    var cp = SettingsManager.Instance.Settings.EndpointConfig(Info.Id);
-                    if (cp != null) cp.SupportsVision = _visionProbeResult;
-                }
-                return ok;
+                return models != null;
             }
             catch
             {

@@ -79,10 +79,6 @@ namespace OMNIX.Core.Ui
                 });
 
             View = new WorkspaceView(this);
-            _toolExecutor.Progress = message => View.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (!_disposed) View.Chat.AddActivity(message);
-            }));
             Theming.ThemeManager.Instance.ApplyTo(View);
             View.Resources.MergedDictionaries.Add(Localization.Strings.Dictionary);
             Theming.ThemeManager.Instance.ThemeChanged += OnThemeChanged;
@@ -225,7 +221,6 @@ namespace OMNIX.Core.Ui
 
             _busy = true;
             View.Chat.SetBusy(true);
-            View.Chat.BeginActivity("Preparing request · reading current Office context");
 
             var userTurn = new ChatTurn
             {
@@ -275,7 +270,6 @@ namespace OMNIX.Core.Ui
                     UserTurn = userTurn
                 };
 
-                View.Chat.AddActivity("Sending request · waiting for model/tool decisions");
                 var response = await _gateway.ChatAsync(
                     request,
                     _adapter,
@@ -311,7 +305,6 @@ namespace OMNIX.Core.Ui
                 bubble.ReplaceText(assistantTurn.Text);
                 _turns.Add(assistantTurn);
                 Persist(requestDocKey);
-                View.Chat.EndActivity("Completed · response stored in this document conversation");
             }
             catch (OperationCanceledException)
             {
@@ -324,13 +317,11 @@ namespace OMNIX.Core.Ui
                 bubble.ReplaceText(assistantTurn.Text);
                 _turns.Add(assistantTurn);
                 Persist(requestDocKey);
-                View.Chat.EndActivity("Cancelled · no further Office operations will run");
             }
             catch (OmnixException ex)
             {
                 if (_disposed || !ValidateCurrentOfficeDocumentScope(requestDocKey, requestScopeVersion)) return;
                 bubble.ReplaceText("");
-                View.Chat.EndActivity("Stopped · OMNIX reported an error");
                 View.Chat.ShowError(ErrorPresenter.Format(ex));
             }
             catch (Exception ex)
@@ -338,7 +329,6 @@ namespace OMNIX.Core.Ui
                 Logger.Error("ui", "SendMessage failed", ex);
                 if (_disposed || !ValidateCurrentOfficeDocumentScope(requestDocKey, requestScopeVersion)) return;
                 bubble.ReplaceText("");
-                View.Chat.EndActivity("Stopped · unexpected error");
                 View.Chat.ShowError(ErrorPresenter.Format(ex));
             }
             finally
