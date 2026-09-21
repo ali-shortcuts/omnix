@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root 'src\OMNIX.Core\bin\Release'
@@ -162,7 +162,7 @@ class WorkspaceStartupRegression {
         Check(host.AccessReads==2,"Access probe crossed stale document boundary");
         executor.RequestScopeValidator = () => true;
         var claim = typeof(OMNIX.Core.AiGateway.AiGateway).GetMethod("IsUnsupportedAccessClaim",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
-        Check((bool)claim.Invoke(null,new object[]{"دسترسی نوشتن به فایل فعال در این نشست در دسترس نیست"}),"Reported Persian access denial not recognized");
+        Check((bool)claim.Invoke(null,new object[]{"\u062f\u0633\u062a\u0631\u0633\u06cc \u0646\u0648\u0634\u062a\u0646 \u0628\u0647 \u0641\u0627\u06cc\u0644 \u0641\u0639\u0627\u0644 \u062f\u0631 \u0627\u06cc\u0646 \u0646\u0634\u0633\u062a \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0646\u06cc\u0633\u062a"}),"Reported Persian access denial not recognized");
         Check((bool)claim.Invoke(null,new object[]{"Write access is unavailable"}),"English access denial not recognized");
         Check(!(bool)claim.Invoke(null,new object[]{"The table was created"}),"Normal answer misclassified as denial");
         var map=new ToolCall { Name=ToolNames.ReadDocumentMap,ArgumentsJson="{\"offset\":20}" };
