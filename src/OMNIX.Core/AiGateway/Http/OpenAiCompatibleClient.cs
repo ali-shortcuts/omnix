@@ -81,6 +81,98 @@ namespace OMNIX.Core.AiGateway.Http
             }
         }
 
+        private static bool HasNativeTools(ChatRequest request)
+        {
+            return request != null && request.Tools != null && request.Tools.Count > 0;
+        }
+
+        private JArray BuildProviderTools(ChatRequest request)
+        {
+            var tools = new JArray();
+            if (!HasNativeTools(request)) return tools;
+
+            foreach (var def in request.Tools)
+            {
+                if (def == null || string.IsNullOrWhiteSpace(def.Name)) continue;
+                JObject schema;
+                try { schema = string.IsNullOrWhiteSpace(def.ParametersJson) ? new JObject { ["type"] = "object" } : JObject.Parse(def.ParametersJson); }
+                catch { schema = new JObject { ["type"] = "object" }; }
+
+                if (_anthropic)
+                {
+                    tools.Add(new JObject
+                    {
+                        ["name"] = def.Name,
+                        ["description"] = def.Description ?? "",
+                        ["input_schema"] = schema
+                    });
+                }
+                else
+                {
+                    tools.Add(new JObject
+                    {
+                        ["type"] = "function",
+                        ["function"] = new JObject
+                        {
+                            ["name"] = def.Name,
+                            ["description"] = def.Description ?? "",
+                            ["parameters"] = schema
+                        }
+                    });
+                }
+            }
+            return tools;
+        }
+
+        private static List<NativeToolCall> ParseOpenAiToolCalls(JObject root)
+        {
+            var result = new List<NativeToolCall>();
+            var calls = root.SelectToken("choices[0].message.tool_calls") as JArray;
+            if (calls == null) return result;
+            foreach (var call in calls)
+            {
+                string name = (string)call.SelectToken("function.name");
+                string args = (string)call.SelectToken("function.arguments") ?? "{}";
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                result.Add(new NativeToolCall
+                {
+                    Id = (string)call["id"] ?? Guid.NewGuid().ToString("N"),
+                    Name = name,
+                    ArgumentsJson = args
+                });
+            }
+            return result;
+        }
+
+        private static List<NativeToolCall> ParseAnthropicToolCalls(JObject root)
+        {
+            var result = new List<NativeToolCall>();
+            foreach (var item in root["content"] as JArray ?? new JArray())
+            {
+                if (!string.Equals((string)item["type"], "tool_use", StringComparison.OrdinalIgnoreCase)) continue;
+                string name = (string)item["name"];
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var input = item["input"] ?? new JObject();
+                result.Add(new NativeToolCall
+                {
+                    Id = (string)item["id"] ?? Guid.NewGuid().ToString("N"),
+                    Name = name,
+                    ArgumentsJson = input.ToString(Formatting.None)
+                });
+            }
+            return result;
+        }
+
+        private static bool IsNativeToolSchemaRejected(OmnixException ex)
+        {
+            if (ex == null) return false;
+            string details = ex.TechnicalDetails ?? "";
+            return (ex.Code == ErrorCode.PROVIDER_ERROR || ex.Code == ErrorCode.MODEL_ERROR) &&
+                   (details.IndexOf("HTTP=400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    details.IndexOf("HTTP=404", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    details.IndexOf("HTTP=422", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
         private string _configuredModel;
 
         public void SetModel(string model) { _configuredModel = model; }
@@ -104,6 +196,16 @@ namespace OMNIX.Core.AiGateway.Http
                 { "messages", messages },
                 { "stream", stream }
             };
+            var providerTools = BuildProviderTools(request);
+            if (providerTools.Count > 0)
+            {
+                payload["tools"] = providerTools;
+                if (!_anthropic)
+                {
+                    payload["tool_choice"] = "auto";
+                    payload["parallel_tool_calls"] = false;
+                }
+            }
             if (_anthropic)
             {
                 payload["max_tokens"] = 4096;
@@ -133,8 +235,31 @@ namespace OMNIX.Core.AiGateway.Http
             Action<string> onDelta, CancellationToken ct)
         {
             _configuredModel = model;
-            string body = BuildPayload(request, onDelta != null);
-            return await SendRawAsync(body, apiKey, onDelta, ct).ConfigureAwait(false);
+            bool nativeToolMode = HasNativeTools(request);
+            bool stream = onDelta != null && !nativeToolMode;
+            string body = BuildPayload(request, stream);
+            try
+            {
+                return await SendRawAsync(body, apiKey, stream ? onDelta : null, ct).ConfigureAwait(false);
+            }
+            catch (OmnixException ex)
+            {
+                if (!nativeToolMode || !IsNativeToolSchemaRejected(ex)) throw;
+
+                // Some "compatible" endpoints implement chat completions but reject native tools.
+                // Fall back once to the legacy text protocol already present in the system prompt.
+                Logging.Logger.Gateway("Native tools rejected by provider=" + _providerDisplayName +
+                    "; falling back to textual OMNIX tool protocol for this request.");
+                var fallback = new ChatRequest
+                {
+                    SystemPrompt = request.SystemPrompt,
+                    History = request.History,
+                    UserTurn = request.UserTurn,
+                    Tools = null
+                };
+                string fallbackBody = BuildPayload(fallback, onDelta != null);
+                return await SendRawAsync(fallbackBody, apiKey, onDelta, ct).ConfigureAwait(false);
+            }
         }
 
         public async Task<ChatResponse> SendRawAsync(string jsonBody, string apiKey,
@@ -179,6 +304,8 @@ namespace OMNIX.Core.AiGateway.Http
                             if (text.Length > MaxAssistantChars)
                                 throw OmnixException.Provider(_providerDisplayName + " returned an over-sized assistant response.");
                             sb.Append(text);
+                            var nativeCalls = _anthropic ? ParseAnthropicToolCalls(root) : ParseOpenAiToolCalls(root);
+                            return new ChatResponse { Text = sb.ToString(), Model = model, ToolCalls = nativeCalls };
                         }
                         else
                         {
