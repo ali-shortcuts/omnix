@@ -25,6 +25,7 @@ namespace OMNIX.Core.AiGateway
     /// </summary>
     public sealed class AiGateway
     {
+        private const int MaxProviderToolRounds = 24;
         private readonly ProviderRegistry _registry;
         private readonly ProviderHealthTracker _health;
         private readonly ProviderRouter _router;
@@ -75,7 +76,7 @@ namespace OMNIX.Core.AiGateway
 
             var approvedProviders = new HashSet<string>(StringComparer.Ordinal);
             ChatResponse final = null;
-            for (int round = 0; round < 8; round++)
+            for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 var req = new ChatRequest
                 {
@@ -198,7 +199,7 @@ namespace OMNIX.Core.AiGateway
             if (final == null)
                 final = new ChatResponse { Text = string.Empty };
             // Never return the last internal tool call as if it were a completed user answer.
-            return new ChatResponse { Text = "OMNIX reached the eight-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
+            return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
         }
 
         private bool ShouldSuggestAlternative(OmnixException ex)
@@ -430,7 +431,7 @@ namespace OMNIX.Core.AiGateway
             if (hostAdapter != null) sb.AppendLine("ACTIVE OFFICE HOST: " + hostAdapter.HostDisplayName + ". You operate only on this workspace's current document, not other applications or arbitrary files.");
             sb.AppendLine("Work method: inspect relevant structure, state the plan and assumptions, request approval for each concrete write, then read back the affected area to check the result. Never claim that a tool or test succeeded without its result.");
             sb.AppendLine("For a business system: clarify business rules, identifiers, relationships, units/currency, validation, totals, and reporting requirements. Never invent live business data. A formatted spreadsheet is not automatically a relational database or a tested accounting system.");
-            sb.AppendLine("There are at most eight provider turns per request. Scope large jobs into explicit stages and report unfinished work. Model support for image input is required for Vision; a text-only connection test does not verify Vision.");
+            sb.AppendLine("There are at most 24 provider/tool turns per request. Complete ordinary multi-sheet jobs within that bounded loop when possible; scope genuinely large jobs into explicit stages and report unfinished work. Model support for image input is required for pixel-level Vision; structured Office inspection does not require image input.");
             sb.AppendLine("You help the user with THEIR document: answering questions, drafting text, writing Excel formulas, summarizing data, and reviewing slides.");
             sb.AppendLine("Use structured Office context first. Never claim you inspected an entire workbook/document/presentation unless the supplied context or a read tool actually contains the relevant scope.");
             sb.AppendLine("Keep previews short: describe the intended change and show sample data. Do not expose tool names, protocol, internal limits or token counts. Ask only for missing decisions that materially change the result; propose sensible defaults for a small demonstration. Count rows and cells accurately. Do not claim a change is irreversible unless the tool explicitly says so.");
