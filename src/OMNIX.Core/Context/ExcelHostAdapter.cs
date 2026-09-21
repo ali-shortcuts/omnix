@@ -19,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IAdvancedOfficeCapabilityHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -44,7 +44,7 @@ namespace OMNIX.Core.Context
         {
             get
             {
-                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, typed cell values, formulas, range highlighting, and bounded professional range formatting (font, alignment, number format, wrap, fill, border and AutoFit). Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
+                return "Excel broad Object Model capability layer: workbook/worksheet navigation; bounded values, formulas and formats; rows/columns; tables; names; sort/filter; validation; conditional formatting; charts; PivotTable refresh/inspection; comments/notes; hyperlinks; freeze panes/zoom; page setup; typed values; formulas; professional formatting; chart/current-view capture. Use list_office_capabilities for the exact current registry. Security/Trust Center, VBA/macro execution, arbitrary files/processes and unknown COM reflection are not exposed.";
             }
         }
 
@@ -52,7 +52,7 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
-            ActivateRelevantRibbonTab(toolName);
+            ActivateRelevantRibbonTab(toolName, args);
             var wb = _app.ActiveWorkbook;
             if (wb == null) return;
 
@@ -82,6 +82,31 @@ namespace OMNIX.Core.Context
                     string address = args.Get("address", args.Get("range", ""));
                     if (ws != null && !string.IsNullOrWhiteSpace(address))
                         ShowRange(ws.Range[address]);
+                    return;
+                }
+
+                if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    string address = args.Get("address", args.Get("destination", ""));
+                    var ws = string.IsNullOrWhiteSpace(sheetName)
+                        ? _app.ActiveSheet as Excel.Worksheet
+                        : wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws != null) ws.Activate();
+                    if (ws != null && !string.IsNullOrWhiteSpace(address))
+                    {
+                        try { ShowRange(ws.Range[address]); } catch { }
+                    }
+                    string chartName = args.Get("chart", "");
+                    if (ws != null && !string.IsNullOrWhiteSpace(chartName))
+                    {
+                        try
+                        {
+                            foreach (Excel.ChartObject chart in (Excel.ChartObjects)ws.ChartObjects())
+                                if (string.Equals(chart.Name, chartName, StringComparison.OrdinalIgnoreCase)) { chart.Activate(); break; }
+                        }
+                        catch { }
+                    }
                     return;
                 }
 
@@ -125,20 +150,43 @@ namespace OMNIX.Core.Context
             }
         }
 
-        private void ActivateRelevantRibbonTab(string toolName)
+        private void ActivateRelevantRibbonTab(string toolName, ToolArguments args)
         {
             string tab = null;
-            switch (toolName)
+            if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
             {
-                case ToolNames.InsertFormula: tab = "TabFormulas"; break;
-                case ToolNames.CreateDataTable: tab = "TabInsert"; break;
-                case ToolNames.ReadDocumentMap:
-                case ToolNames.ReadDocumentSection: tab = "TabData"; break;
-                case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
-                case ToolNames.WriteToCell:
-                case ToolNames.HighlightRange:
-                case ToolNames.ReadSelection:
-                case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+                string op = args != null ? args.Get("operation", "") : "";
+                if (op.StartsWith("sort.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("validation.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("pivot.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabData";
+                else if (op.StartsWith("chart.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabInsert";
+                else if (op.StartsWith("page_setup.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabPageLayoutExcel";
+                else if (op.StartsWith("view.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabView";
+                else
+                    tab = "TabHome";
+            }
+            else
+            {
+                switch (toolName)
+                {
+                    case ToolNames.InsertFormula: tab = "TabFormulas"; break;
+                    case ToolNames.CreateDataTable: tab = "TabInsert"; break;
+                    case ToolNames.ReadDocumentMap:
+                    case ToolNames.ReadDocumentSection: tab = "TabData"; break;
+                    case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
+                    case ToolNames.WriteToCell:
+                    case ToolNames.HighlightRange:
+                    case ToolNames.FormatRange:
+                    case ToolNames.ReadSelection:
+                    case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+                }
             }
             if (tab == null || _ribbonUi == null) return;
             try { _ribbonUi.ActivateTabMso(tab); }
@@ -432,6 +480,8 @@ namespace OMNIX.Core.Context
                 case ToolNames.HighlightRange:
                 case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
+                case ToolNames.ApplyOfficeCapability:
+                    return PrepareCapabilityWrite(argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
                         "Tool '" + toolName + "' is not supported by Excel.",
@@ -442,7 +492,23 @@ namespace OMNIX.Core.Context
         public void ApplyWrite(string toolName, string argumentsJson)
         {
             if (toolName == ToolNames.CreateDataTable) ExcelTableBuilder.Apply(_app, argumentsJson);
+            else if (toolName == ToolNames.ApplyOfficeCapability) ApplyCapabilityWrite(argumentsJson);
             else ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
+        }
+
+        public string InspectCapability(ToolArguments arguments)
+        {
+            return ExcelAdvancedCapabilities.Inspect(this, arguments);
+        }
+
+        public WritePreview PrepareCapabilityWrite(string argumentsJson)
+        {
+            return ExcelAdvancedCapabilities.Prepare(this, argumentsJson);
+        }
+
+        public void ApplyCapabilityWrite(string argumentsJson)
+        {
+            ExcelAdvancedCapabilities.Apply(this, argumentsJson);
         }
 
         internal Excel.Application App { get { return _app; } }

@@ -16,7 +16,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IAdvancedOfficeCapabilityHost
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -39,7 +39,7 @@ namespace OMNIX.Core.Context
         {
             get
             {
-                return "Word direct object-model access: document/selection text, paragraphs/headings/tables metadata, main text plus available headers/footers/comments/footnotes/endnotes/text-frame stories, current-view capture, and confirmed rewrite of the exact selected range with native UndoRecord. OMNIX visibly navigates to the real Word range and activates the relevant native Ribbon tab when possible.";
+                return "Word broad Object Model capability layer: document/selection text, paragraphs, styles, tables, bookmarks, fields, comments, revisions/Track Changes, content controls, sections/page setup, headers/footers, hyperlinks, safe fields, text/font/paragraph formatting, story ranges and current-view capture. Use list_office_capabilities for the exact registry. VBA/macro execution, Trust Center/security changes, arbitrary files/processes and unknown COM reflection are not exposed.";
             }
         }
 
@@ -47,7 +47,7 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
-            ActivateRelevantRibbonTab(toolName);
+            ActivateRelevantRibbonTab(toolName, args);
             try
             {
                 var win = _app.ActiveWindow;
@@ -76,6 +76,37 @@ namespace OMNIX.Core.Context
                     return;
                 }
 
+                if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
+                {
+                    var doc = _app.ActiveDocument;
+                    if (doc == null) return;
+
+                    int start, end;
+                    if (int.TryParse(args.Get("start", ""), out start) &&
+                        int.TryParse(args.Get("end", ""), out end) &&
+                        start >= doc.Content.Start && end >= start && end <= doc.Content.End)
+                    {
+                        var target = doc.Range(start, end);
+                        target.Select();
+                        win.ScrollIntoView(target, true);
+                        return;
+                    }
+
+                    int tableIndex;
+                    if (int.TryParse(args.Get("table", ""), out tableIndex) &&
+                        tableIndex >= 1 && tableIndex <= doc.Tables.Count)
+                    {
+                        doc.Tables[tableIndex].Range.Select();
+                        win.ScrollIntoView(doc.Tables[tableIndex].Range, true);
+                        return;
+                    }
+
+                    var selection = _app.Selection;
+                    if (selection != null && selection.Range != null)
+                        win.ScrollIntoView(selection.Range, true);
+                    return;
+                }
+
                 if (toolName == ToolNames.RewriteSelectedText || toolName == ToolNames.ReadSelection ||
                     toolName == ToolNames.CaptureCurrentViewAsImage)
                 {
@@ -90,16 +121,37 @@ namespace OMNIX.Core.Context
             }
         }
 
-        private void ActivateRelevantRibbonTab(string toolName)
+        private void ActivateRelevantRibbonTab(string toolName, ToolArguments args)
         {
             string tab = null;
-            switch (toolName)
+            if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
             {
-                case ToolNames.RewriteSelectedText:
-                case ToolNames.ReadSelection: tab = "TabHome"; break;
-                case ToolNames.ReadDocumentMap:
-                case ToolNames.ReadDocumentSection:
-                case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+                string op = args != null ? args.Get("operation", "") : "";
+                if (op.StartsWith("comment.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("revisions.", StringComparison.OrdinalIgnoreCase) ||
+                    op == "track_changes")
+                    tab = "TabReviewWord";
+                else if (op.StartsWith("page_setup.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("header_footer.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabPageLayoutWord";
+                else if (op.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("field.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("content_control.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabInsert";
+                else
+                    tab = "TabHome";
+            }
+            else
+            {
+                switch (toolName)
+                {
+                    case ToolNames.RewriteSelectedText:
+                    case ToolNames.ReadSelection: tab = "TabHome"; break;
+                    case ToolNames.ReadDocumentMap:
+                    case ToolNames.ReadDocumentSection:
+                    case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+                }
             }
             if (tab == null || _ribbonUi == null) return;
             try { _ribbonUi.ActivateTabMso(tab); }
@@ -341,10 +393,12 @@ namespace OMNIX.Core.Context
 
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ApplyOfficeCapability)
+                return PrepareCapabilityWrite(argumentsJson);
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR,
                     "Tool '" + toolName + "' is not supported by Word.",
-                    "WordHostAdapter.PrepareWrite", "Use rewrite_selected_text.");
+                    "WordHostAdapter.PrepareWrite", "Use rewrite_selected_text or apply_office_capability.");
 
             var args = ToolArguments.Parse(argumentsJson);
             var sel = RequireBoundedRewriteSelection(toolName);
@@ -367,6 +421,11 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ApplyOfficeCapability)
+            {
+                ApplyCapabilityWrite(argumentsJson);
+                return;
+            }
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR, "Unknown Word write tool: " + toolName, "", "");
 
@@ -390,6 +449,23 @@ namespace OMNIX.Core.Context
             }
             Logging.Logger.Install("Word write tool applied: rewrite_selected_text (replacement chars=" + newText.Length + ")");
         }
+
+        public string InspectCapability(ToolArguments arguments)
+        {
+            return WordAdvancedCapabilities.Inspect(this, arguments);
+        }
+
+        public WritePreview PrepareCapabilityWrite(string argumentsJson)
+        {
+            return WordAdvancedCapabilities.Prepare(this, argumentsJson);
+        }
+
+        public void ApplyCapabilityWrite(string argumentsJson)
+        {
+            WordAdvancedCapabilities.Apply(this, argumentsJson);
+        }
+
+        internal Word.Application App { get { return _app; } }
 
         private Word.Selection RequireBoundedRewriteSelection(string toolName)
         {

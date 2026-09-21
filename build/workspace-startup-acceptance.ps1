@@ -95,8 +95,10 @@ class WorkspaceStartupRegression {
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
-    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter {
+    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter, IAdvancedOfficeCapabilityHost {
         public int Reads;
+        public int AdvancedReads;
+        public int AdvancedWrites;
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
         public OfficeContext ReadContext() { return new OfficeContext { Host=HostType.Excel,DocumentName="navigation-test.xlsx" }; }
@@ -107,8 +109,20 @@ class WorkspaceStartupRegression {
         public byte[] CaptureChartAsImage(string name) { return null; }
         public byte[] CaptureSlideAsImage(int index) { return null; }
         public byte[] CaptureCurrentViewAsImage() { return null; }
-        public WritePreview PrepareWrite(string name,string json) { throw new NotSupportedException(); }
-        public void ApplyWrite(string name,string json) { throw new NotSupportedException(); }
+        public string InspectCapability(ToolArguments args) { AdvancedReads++; return "advanced-read:"+args.Get("operation",""); }
+        public WritePreview PrepareCapabilityWrite(string json) {
+            var args=ToolArguments.Parse(json);
+            return new WritePreview { ToolName=ToolNames.ApplyOfficeCapability,Title="Advanced preview",Before="before",After=args.Get("operation",""),ArgumentsJson=json };
+        }
+        public void ApplyCapabilityWrite(string json) { AdvancedWrites++; }
+        public WritePreview PrepareWrite(string name,string json) {
+            if(name==ToolNames.ApplyOfficeCapability) return PrepareCapabilityWrite(json);
+            throw new NotSupportedException();
+        }
+        public void ApplyWrite(string name,string json) {
+            if(name==ToolNames.ApplyOfficeCapability) { ApplyCapabilityWrite(json); return; }
+            throw new NotSupportedException();
+        }
     }
     static void CapabilityRegression() {
         var host=new FakeHost(); var executor=new ToolExecutor();
@@ -138,6 +152,25 @@ class WorkspaceStartupRegression {
               prompt.Contains("read_document_section") && prompt.Contains("create_data_table") &&
               prompt.Contains("format_range"),"Professional host capabilities/runtime identity missing from prompt");
         Check(ToolNames.IsWhitelisted(ToolNames.FormatRange) && ToolNames.IsWriteTool(ToolNames.FormatRange),"format_range must remain inside confirmed write boundary");
+        Check(ToolNames.IsWhitelisted(ToolNames.ListOfficeCapabilities) && !ToolNames.IsWriteTool(ToolNames.ListOfficeCapabilities),"Capability catalog must remain read-only");
+        Check(ToolNames.IsWhitelisted(ToolNames.InspectOfficeCapability) && !ToolNames.IsWriteTool(ToolNames.InspectOfficeCapability),"Capability inspection must remain read-only");
+        Check(ToolNames.IsWhitelisted(ToolNames.ApplyOfficeCapability) && ToolNames.IsWriteTool(ToolNames.ApplyOfficeCapability),"Advanced capability writes must remain confirmed writes");
+        Check(OfficeCapabilityRegistry.Search(HostType.Excel,"validation",0).Contains("validation.add"),"Excel capability registry missing validation");
+        Check(OfficeCapabilityRegistry.Search(HostType.Word,"track",0).Contains("track_changes"),"Word capability registry missing Track Changes");
+        Check(OfficeCapabilityRegistry.Search(HostType.PowerPoint,"animation",0).Contains("animation.add"),"PowerPoint capability registry missing animation");
+        Check(prompt.Contains("list_office_capabilities") && prompt.Contains("apply_office_capability"),"Broad Office capability discovery missing from system prompt");
+
+        var catalogCall=new ToolCall { Name=ToolNames.ListOfficeCapabilities,ArgumentsJson="{\"query\":\"table\",\"offset\":0}" };
+        Check(executor.ExecuteAsync(catalogCall,host).GetAwaiter().GetResult().Success,"Capability catalog tool failed");
+        var inspectCall=new ToolCall { Name=ToolNames.InspectOfficeCapability,ArgumentsJson="{\"operation\":\"range.inspect\"}" };
+        Check(executor.ExecuteAsync(inspectCall,host).GetAwaiter().GetResult().Success && host.AdvancedReads==1,"Advanced capability inspection routing failed");
+        var applyCall=new ToolCall { Name=ToolNames.ApplyOfficeCapability,ArgumentsJson="{\"operation\":\"sheet.create\",\"name\":\"X\"}" };
+        executor.WriteConfirmation=preview=>Task.FromResult(false);
+        var deniedAdvanced=executor.ExecuteAsync(applyCall,host).GetAwaiter().GetResult();
+        Check(!deniedAdvanced.Success && host.AdvancedWrites==0,"Advanced write bypassed confirmation");
+        executor.WriteConfirmation=preview=>Task.FromResult(true);
+        var approvedAdvanced=executor.ExecuteAsync(applyCall,host).GetAwaiter().GetResult();
+        Check(approvedAdvanced.Success && host.AdvancedWrites==1,"Approved advanced write did not execute exactly once");
         Check(!prompt.Contains("rewrite_selected_text {text}"),"Foreign host write tool advertised");
         using(var controller=new WorkspaceController(host,new ChatHistoryStore())) {
             var method=typeof(WorkspaceController).GetMethod("RunOnUiThread",BindingFlags.Instance|BindingFlags.NonPublic).MakeGenericMethod(typeof(bool));

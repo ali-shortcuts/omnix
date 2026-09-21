@@ -45,6 +45,19 @@ namespace OMNIX.Core.Context
         string CapabilitySummary { get; }
     }
 
+    /// <summary>
+    /// Broad, host-specific Office capability surface. Read operations are bounded and write
+    /// operations still flow through the same preview/confirmation/scope boundary as every other
+    /// OMNIX mutation. Implementations must reject unknown operations instead of using reflection,
+    /// eval, macros, arbitrary file access, or unbounded COM dispatch.
+    /// </summary>
+    public interface IAdvancedOfficeCapabilityHost
+    {
+        string InspectCapability(ToolArguments arguments);
+        WritePreview PrepareCapabilityWrite(string argumentsJson);
+        void ApplyCapabilityWrite(string argumentsJson);
+    }
+
     public interface IHostAdapter
     {
         HostType Host { get; }
