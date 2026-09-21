@@ -19,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -421,6 +421,10 @@ namespace OMNIX.Core.Context
             }
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.Excel, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return ExcelCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { ExcelCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
             switch (toolName)
@@ -432,6 +436,8 @@ namespace OMNIX.Core.Context
                 case ToolNames.HighlightRange:
                 case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
+                case ToolNames.ExecuteOfficeCapability:
+                    return PrepareCapability(argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
                         "Tool '" + toolName + "' is not supported by Excel.",
@@ -442,6 +448,7 @@ namespace OMNIX.Core.Context
         public void ApplyWrite(string toolName, string argumentsJson)
         {
             if (toolName == ToolNames.CreateDataTable) ExcelTableBuilder.Apply(_app, argumentsJson);
+            else if (toolName == ToolNames.ExecuteOfficeCapability) ApplyCapability(argumentsJson);
             else ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
         }
 
