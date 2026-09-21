@@ -117,6 +117,7 @@
     <Compile Include="Theming\ThemeManager.cs" />
     <Compile Include="Tools\ToolExecutor.cs" />
     <Compile Include="Tools\OfficeCapabilityRegistry.cs" />
+    <Compile Include="Tools\ExcelAdvancedCapabilities.cs" />
     <Compile Include="Tools\ExcelTableBuilder.cs" />
     <Compile Include="Tools\Tools.cs" />
     <Compile Include="Ui\ChatBubble.cs" />
