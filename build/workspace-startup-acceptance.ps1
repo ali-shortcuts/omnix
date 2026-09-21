@@ -118,6 +118,10 @@ class WorkspaceStartupRegression {
         Check(!executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==2,"Invalid offset crossed host boundary");
         string valid="{\"sheet\":\"Products\",\"headers\":[\"ID\",\"Price\"],\"rows\":[[\"001\",12.5]]}";
         Check(ExcelTableBuilder.ValidatePlan(valid)!=null,"Valid table rejected");
+        string typed="{\"sheet\":\"Report\",\"uniqueName\":true,\"headers\":[\"Formula\",\"Date\"],\"rows\":[[{\"formula\":\"=1+1\",\"numberFormat\":\"0\"},{\"date\":\"2026-09-21\"}]]}";
+        Check(ExcelTableBuilder.ValidatePlan(typed)!=null,"Typed formula/date table rejected");
+        bool badTypedRejected=false; try { ExcelTableBuilder.ValidatePlan(typed.Replace("=1+1","1+1")); } catch { badTypedRejected=true; }
+        Check(badTypedRejected,"Non-formula typed cell accepted");
         foreach(string invalid in new[]{valid.Replace("Products","Bad/Name"),valid.Replace("Price","ID"),valid.Replace("12.5]","12.5,4]"),"{}",new string('x',32001)}) {
             bool rejected=false; try { ExcelTableBuilder.ValidatePlan(invalid); } catch { rejected=true; }
             Check(rejected,"Invalid table plan accepted");
