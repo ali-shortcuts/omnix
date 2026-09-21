@@ -74,6 +74,87 @@ namespace OMNIX.Core.AiGateway.Adapters
             return new JObject { { "parts", parts } };
         }
 
+        private static bool HasNativeTools(ChatRequest request)
+        {
+            return request != null && request.Tools != null && request.Tools.Count > 0;
+        }
+
+        private static JToken GeminiSchema(JToken token)
+        {
+            if (token == null) return null;
+            if (token.Type == JTokenType.Object)
+            {
+                var src = (JObject)token;
+                var dst = new JObject();
+                foreach (var p in src.Properties())
+                {
+                    if (p.Name == "additionalProperties") continue; // Gemini Schema does not consistently accept this JSON-Schema keyword.
+                    if (p.Name == "type" && p.Value.Type == JTokenType.String)
+                        dst[p.Name] = p.Value.ToString().ToUpperInvariant();
+                    else
+                        dst[p.Name] = GeminiSchema(p.Value);
+                }
+                return dst;
+            }
+            if (token.Type == JTokenType.Array)
+            {
+                var arr = new JArray();
+                foreach (var item in (JArray)token) arr.Add(GeminiSchema(item));
+                return arr;
+            }
+            return token.DeepClone();
+        }
+
+        private static JArray BuildGeminiTools(ChatRequest request)
+        {
+            var declarations = new JArray();
+            if (!HasNativeTools(request)) return declarations;
+            foreach (var def in request.Tools)
+            {
+                if (def == null || string.IsNullOrWhiteSpace(def.Name)) continue;
+                JObject schema;
+                try { schema = string.IsNullOrWhiteSpace(def.ParametersJson) ? new JObject { ["type"] = "object" } : JObject.Parse(def.ParametersJson); }
+                catch { schema = new JObject { ["type"] = "object" }; }
+                declarations.Add(new JObject
+                {
+                    ["name"] = def.Name,
+                    ["description"] = def.Description ?? "",
+                    ["parameters"] = GeminiSchema(schema)
+                });
+            }
+            return declarations;
+        }
+
+        private static List<NativeToolCall> ParseGeminiToolCalls(JObject root)
+        {
+            var calls = new List<NativeToolCall>();
+            int index = 0;
+            foreach (var part in root.SelectTokens("candidates[0].content.parts[*]"))
+            {
+                var fn = part["functionCall"] as JObject;
+                if (fn == null) continue;
+                string name = (string)fn["name"];
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                calls.Add(new NativeToolCall
+                {
+                    Id = "gemini-" + (++index),
+                    Name = name,
+                    ArgumentsJson = (fn["args"] ?? new JObject()).ToString(Formatting.None)
+                });
+            }
+            return calls;
+        }
+
+        private static bool IsNativeToolSchemaRejected(OmnixException ex)
+        {
+            if (ex == null) return false;
+            string details = ex.TechnicalDetails ?? "";
+            return (ex.Code == ErrorCode.PROVIDER_ERROR || ex.Code == ErrorCode.MODEL_ERROR) &&
+                   (details.IndexOf("HTTP=400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    details.IndexOf("HTTP=404", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    details.IndexOf("HTTP=422", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
         public string BuildPayload(ChatRequest request, bool stream)
         {
             request = ChatRequestBudgeter.Apply(request);
@@ -94,6 +175,18 @@ namespace OMNIX.Core.AiGateway.Adapters
             }
 
             var payload = new JObject { { "contents", contents } };
+            var declarations = BuildGeminiTools(request);
+            if (declarations.Count > 0)
+            {
+                payload["tools"] = new JArray
+                {
+                    new JObject { ["functionDeclarations"] = declarations }
+                };
+                payload["toolConfig"] = new JObject
+                {
+                    ["functionCallingConfig"] = new JObject { ["mode"] = "AUTO" }
+                };
+            }
             if (!string.IsNullOrEmpty(request.SystemPrompt))
                 payload["systemInstruction"] = new JObject
                 {
@@ -110,6 +203,28 @@ namespace OMNIX.Core.AiGateway.Adapters
             if (string.IsNullOrWhiteSpace(Model))
                 throw OmnixException.Model("Select a Gemini model from Load Models or enter a model ID before sending.");
 
+            bool nativeToolMode = HasNativeTools(request);
+            try
+            {
+                return await SendCoreAsync(request, nativeToolMode ? null : onDelta, ct).ConfigureAwait(false);
+            }
+            catch (OmnixException ex)
+            {
+                if (!nativeToolMode || !IsNativeToolSchemaRejected(ex)) throw;
+                Logging.Logger.Gateway("Native Gemini tools rejected; falling back to textual OMNIX tool protocol for this request.");
+                var fallback = new ChatRequest
+                {
+                    SystemPrompt = request.SystemPrompt,
+                    History = request.History,
+                    UserTurn = request.UserTurn,
+                    Tools = null
+                };
+                return await SendCoreAsync(fallback, onDelta, ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task<ChatResponse> SendCoreAsync(ChatRequest request, Action<string> onDelta, CancellationToken ct)
+        {
             string url = Base + "/models/" + Uri.EscapeDataString(Model) +
                          (onDelta != null ? ":streamGenerateContent?alt=sse" : ":generateContent");
 
@@ -141,26 +256,30 @@ namespace OMNIX.Core.AiGateway.Adapters
                                     throw OmnixException.Provider("Gemini returned an over-sized assistant response.");
                                 sb.Append(text);
                             }
-                        }
-                        else
-                        {
-                            using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                            return new ChatResponse
                             {
-                                foreach (string data in SseLineReader.ReadDataLines(stream, ct))
+                                Text = sb.ToString(),
+                                Model = Model,
+                                ToolCalls = ParseGeminiToolCalls(root)
+                            };
+                        }
+
+                        using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                        {
+                            foreach (string data in SseLineReader.ReadDataLines(stream, ct))
+                            {
+                                JObject chunk;
+                                try { chunk = JObject.Parse(data); }
+                                catch { continue; }
+                                foreach (var part in chunk.SelectTokens("candidates[0].content.parts[*]"))
                                 {
-                                    JObject chunk;
-                                    try { chunk = JObject.Parse(data); }
-                                    catch { continue; }
-                                    foreach (var part in chunk.SelectTokens("candidates[0].content.parts[*]"))
+                                    string delta = (string)part["text"];
+                                    if (!string.IsNullOrEmpty(delta))
                                     {
-                                        string delta = (string)part["text"];
-                                        if (!string.IsNullOrEmpty(delta))
-                                        {
-                                            if (sb.Length + delta.Length > MaxAssistantChars)
-                                                throw OmnixException.Provider("Gemini streamed an over-sized assistant response.");
-                                            sb.Append(delta);
-                                            onDelta(delta);
-                                        }
+                                        if (sb.Length + delta.Length > MaxAssistantChars)
+                                            throw OmnixException.Provider("Gemini streamed an over-sized assistant response.");
+                                        sb.Append(delta);
+                                        onDelta(delta);
                                     }
                                 }
                             }
