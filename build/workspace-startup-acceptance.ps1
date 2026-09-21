@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root 'src\OMNIX.Core\bin\Release'
@@ -6,6 +6,7 @@ $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $wpf = Join-Path $framework 'WPF'
 $source = @'
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -95,7 +96,10 @@ class WorkspaceStartupRegression {
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
-    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter {
+    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter, IOfficeAccessHost {
+        public bool AllowWrites; public int Writes;
+        public int AccessReads;
+        public string ReadOfficeAccess() { AccessReads++; return "documentPresent=true; writeToolsExposed=true; readOnly=false; workbookStructureProtected=false"; }
         public int Reads;
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
@@ -107,11 +111,60 @@ class WorkspaceStartupRegression {
         public byte[] CaptureChartAsImage(string name) { return null; }
         public byte[] CaptureSlideAsImage(int index) { return null; }
         public byte[] CaptureCurrentViewAsImage() { return null; }
-        public WritePreview PrepareWrite(string name,string json) { throw new NotSupportedException(); }
-        public void ApplyWrite(string name,string json) { throw new NotSupportedException(); }
+        public WritePreview PrepareWrite(string name,string json) { if (!AllowWrites) throw new NotSupportedException(); return new WritePreview { ToolName=name, ArgumentsJson=json, Title="Test", Before="empty", After="sample" }; }
+        public void ApplyWrite(string name,string json) { if (!AllowWrites) throw new NotSupportedException(); Writes++; }
+    }
+    sealed class AccessProvider : IProviderAdapter {
+        public int Calls; public bool CancelScenario;
+        public ProviderInfo Info { get; private set; }
+        public AccessProvider() { Info = new ProviderInfo { Id="custom", DisplayName="Test", Kind=ProviderKind.Cloud, Vision=VisionSupport.No }; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            string write="```omnix_tool\n{\"tool\":\"create_data_table\",\"args\":{\"sheet\":\"Test\",\"headers\":[\"ID\"],\"rows\":[[1]]}}\n```";
+            string answer = CancelScenario ? (Calls==1 ? write : "Write access is unavailable")
+                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : "Verified completed";
+            if(delta!=null) delta(answer);
+            return Task.FromResult(new ChatResponse { Text=answer });
+        }
+    }
+    static void AccessRecoveryRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            foreach(bool cancel in new[]{false,true}) {
+                var registry=new ProviderRegistry(); var provider=new AccessProvider { CancelScenario=cancel };
+                var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+                providers.Clear(); providers.Add(provider);
+                var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+                var host=new FakeHost { AllowWrites=true }; int confirmations=0;
+                var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(!cancel); } };
+                var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+                Check(confirmations==1 && host.Writes==(cancel ? 0 : 1),"Recovery bypassed confirmation or failed to execute approved write");
+                Check(provider.Calls==(cancel ? 2 : 3),"Recovery retried cancelled write or exceeded bounded repair");
+                if(!cancel) Check(result.Text=="Verified completed","Gateway did not return corrected final answer");
+            }
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
     static void CapabilityRegression() {
         var host=new FakeHost(); var executor=new ToolExecutor();
+        var accessCall = new ToolCall { Name=ToolNames.ReadOfficeAccess, ArgumentsJson="{}" };
+        var accessResult = executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult();
+        Check(accessResult.Success && accessResult.ContentForModel.Contains("confirmationHandlerAvailable=False") && host.AccessReads==1,"Access probe must disclose missing confirmation handler");
+        executor.WriteConfirmation = preview => Task.FromResult(true);
+        Check(executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult().ContentForModel.Contains("confirmationHandlerAvailable=True"),"Access probe did not reflect available confirmation");
+        executor.RequestScopeValidator = () => false;
+        try { executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult(); throw new Exception("Stale access probe allowed"); } catch(OperationCanceledException) {}
+        Check(host.AccessReads==2,"Access probe crossed stale document boundary");
+        executor.RequestScopeValidator = () => true;
+        var claim = typeof(OMNIX.Core.AiGateway.AiGateway).GetMethod("IsUnsupportedAccessClaim",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
+        Check((bool)claim.Invoke(null,new object[]{"\u062f\u0633\u062a\u0631\u0633\u06cc \u0646\u0648\u0634\u062a\u0646 \u0628\u0647 \u0641\u0627\u06cc\u0644 \u0641\u0639\u0627\u0644 \u062f\u0631 \u0627\u06cc\u0646 \u0646\u0634\u0633\u062a \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0646\u06cc\u0633\u062a"}),"Reported Persian access denial not recognized");
+        Check((bool)claim.Invoke(null,new object[]{"Write access is unavailable"}),"English access denial not recognized");
+        Check(!(bool)claim.Invoke(null,new object[]{"The table was created"}),"Normal answer misclassified as denial");
         var map=new ToolCall { Name=ToolNames.ReadDocumentMap,ArgumentsJson="{\"offset\":20}" };
         Check(executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==1,"Map navigation failed");
         var section=new ToolCall { Name=ToolNames.ReadDocumentSection,ArgumentsJson="{}" };
@@ -264,6 +317,7 @@ class WorkspaceStartupRegression {
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();
+            AccessRecoveryRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");
