@@ -82,3 +82,29 @@ Sources:
 - https://learn.microsoft.com/en-us/visualstudio/vsto/office-solutions-development-overview-vsto
 - https://learn.microsoft.com/en-us/microsoft-365-apps/end-of-support/windows-10-support
 - https://learn.microsoft.com/en-us/office/ltsc/2024/overview
+
+
+## Broad Office capability registry
+
+OMNIX now exposes a searchable, explicit capability registry for the active Office host. Models
+use `list_office_capabilities` to discover registered operations, `inspect_office_capability`
+for bounded read-only inspection, and `apply_office_capability` for one explicit mutation behind
+the same preview/confirmation/document-scope boundary as the older focused tools.
+
+The registry substantially expands the programmable Office surface:
+
+- **Excel:** worksheets; bounded ranges; rows/columns; tables; defined names; sorting/filtering;
+  data validation; conditional formatting; charts; PivotTable inspection/refresh; cell notes;
+  HTTPS/mailto hyperlinks; freeze panes/zoom; page setup; plus the existing formulas, typed values,
+  professional formatting and structured table creation.
+- **Word:** document/selection/paragraph inspection; styles; tables; bookmarks; fields; comments;
+  revisions and Track Changes; content controls; sections/page setup; headers/footers; bounded text,
+  font and paragraph formatting; safe allowlisted fields and HTTPS/mailto hyperlinks.
+- **PowerPoint:** presentation/slides/sections; shape inspection and geometry; text formatting;
+  tables; speaker notes; HTTPS/mailto shape hyperlinks; transitions; basic entrance animations;
+  slide layout/move/duplicate/delete and visible slide navigation.
+
+This is intentionally **not arbitrary COM access**. Unknown operation names fail closed. OMNIX does
+not expose VBA/macro execution, Trust Center/security changes, arbitrary file/process access,
+reflective invocation, or automatic modal-dialog control. Those exclusions are security boundaries,
+not missing hidden capabilities.
