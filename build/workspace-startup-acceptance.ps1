@@ -131,6 +131,47 @@ class WorkspaceStartupRegression {
             return Task.FromResult(new ChatResponse { Text=answer });
         }
     }
+    sealed class NativeWriteProvider : IProviderAdapter {
+        public int Calls;
+        public ProviderInfo Info { get; private set; }
+        public NativeWriteProvider() { Info=new ProviderInfo{Id="custom",DisplayName="Native Fixture",Kind=ProviderKind.Cloud,Vision=VisionSupport.No}; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            if(Calls==1) return Task.FromResult(new ChatResponse {
+                Text="",
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-1", Name="omnix.create_data_table",
+                        ArgumentsJson="{\"sheet\":\"NativeTest\",\"headers\":[\"ID\"],\"rows\":[[1]]}" }
+                }
+            });
+            return Task.FromResult(new ChatResponse { Text="Verified completed" });
+        }
+    }
+
+    static void NativeGatewayRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            var registry=new ProviderRegistry(); var provider=new NativeWriteProvider();
+            var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+            providers.Clear(); providers.Add(provider);
+            var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+            var host=new FakeHost { AllowWrites=true };
+            int confirmations=0;
+            var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
+            var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },
+                host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+            Check(provider.Calls==2,"Native tool response did not continue to final provider turn");
+            Check(confirmations==1 && host.Writes==1,"Native tool call with empty text was not executed through confirmation");
+            Check(result.Text=="Verified completed","Native tool loop did not return final answer");
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
+    }
+
     static void AccessRecoveryRegression() {
         var settings=SettingsManager.Instance.Settings;
         var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
@@ -373,6 +414,7 @@ class WorkspaceStartupRegression {
             AsyncContextRegression();
             CapabilityRegression();
             AccessRecoveryRegression();
+            NativeGatewayRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");
