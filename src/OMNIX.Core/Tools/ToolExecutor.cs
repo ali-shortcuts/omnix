@@ -166,6 +166,21 @@ namespace OMNIX.Core.Tools
                         return ToolResult.Fail("The current Office view could not be captured as an image.");
                     return VisionCaptureResult(adapter.HostDisplayName + " current view/selection", call.Name, png);
                 }
+                case ToolNames.ListOfficeCapabilities:
+                {
+                    var args = ToolArguments.Parse(call.ArgumentsJson);
+                    string query = args.Get("query", "");
+                    int offset = args.Integer("offset", 0, 0, 10000);
+                    return ToolResult.Ok(OfficeCapabilityRegistry.Search(adapter.Host, query, offset));
+                }
+                case ToolNames.InspectOfficeCapability:
+                {
+                    var advanced = adapter as IAdvancedOfficeCapabilityHost;
+                    if (advanced == null) return ToolResult.Fail("Advanced Office capability inspection is unavailable for this host.");
+                    EnsureRequestScope(ct);
+                    string data = advanced.InspectCapability(ToolArguments.Parse(call.ArgumentsJson));
+                    return ToolResult.Ok(UntrustedData.Wrap("OFFICE CAPABILITY INSPECTION RESULT", data));
+                }
                 default:
                     return ToolResult.Fail("Unhandled read tool: " + call.Name);
             }
