@@ -119,6 +119,11 @@ namespace OMNIX.Core.Tools
             string s = token.ToString();
             return s ?? fallback;
         }
+
+        public JToken Token(string key)
+        {
+            return _obj[key];
+        }
     }
 
     /// <summary>
