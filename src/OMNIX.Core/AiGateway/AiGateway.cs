@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using OMNIX.Core.AiGateway.Adapters;
 using OMNIX.Core.Context;
 using OMNIX.Core.ContextLimiter;
@@ -26,6 +27,8 @@ namespace OMNIX.Core.AiGateway
     public sealed class AiGateway
     {
         private const int MaxProviderToolRounds = 24;
+        private const int MaxMutationRepairTurns = 2;
+        private const int MaxProtocolRepairTurns = 2;
         private readonly ProviderRegistry _registry;
         private readonly ProviderHealthTracker _health;
         private readonly ProviderRouter _router;
@@ -87,6 +90,44 @@ namespace OMNIX.Core.AiGateway
             ChatResponse final = null;
             bool accessClarified = false;
             bool writeAttempted = false;
+            bool writeSucceeded = false;
+            int successfulWrites = 0;
+            int failedWrites = 0;
+            string lastWriteFailure = null;
+            int mutationRepairTurns = 0;
+            int protocolRepairTurns = 0;
+            bool mutationRequested = MutationIntentDetector.IsLikelyMutation(request.UserTurn != null ? request.UserTurn.Text : null);
+            string runtimePreflight = "";
+
+            if (mutationRequested && hostAdapter != null && toolExecutor != null)
+            {
+                try
+                {
+                    var access = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" },
+                        hostAdapter).ConfigureAwait(true);
+                    var map = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadDocumentMap, ArgumentsJson = "{\"offset\":0}" },
+                        hostAdapter).ConfigureAwait(true);
+                    accessClarified = true;
+                    runtimePreflight =
+                        "OMNIX RUNTIME PREFLIGHT (authoritative, measured before provider execution):\n" +
+                        "Office access: " + SafeRuntimeSummary(access != null ? access.ContentForModel : null, 1400) + "\n" +
+                        "Document map: " + SafeRuntimeSummary(map != null ? map.ContentForModel : null, 2200) + "\n" +
+                        "The original user request requires actual Office mutation. A text-only answer is not completion.";
+                    Logger.Gateway("Mutation preflight completed; accessSuccess=" + (access != null && access.Success) +
+                                   "; mapSuccess=" + (map != null && map.Success));
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Logger.Error("gateway", "Mutation preflight failed; provider may still inspect with normal tools.", ex);
+                    runtimePreflight =
+                        "OMNIX RUNTIME PREFLIGHT: mutation requested, but automatic preflight could not complete. " +
+                        "Use read_office_access/read_document_map before making any access claim.";
+                }
+            }
+
             for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 // Refresh the Office runtime envelope before EVERY provider turn. A previous tool
@@ -103,11 +144,15 @@ namespace OMNIX.Core.AiGateway
                     Logger.Error("gateway", "Could not refresh live Office host context; using request-start context.", ex);
                 }
 
+                if (!string.IsNullOrEmpty(runtimePreflight))
+                    liveSystemPrompt += "\n\n" + runtimePreflight;
+
                 var req = new ChatRequest
                 {
                     SystemPrompt = liveSystemPrompt,
                     History = history,
-                    UserTurn = current
+                    UserTurn = current,
+                    UseNativeTools = true
                 };
 
                 IProviderAdapter provider = _router.Resolve(SettingsManager.Instance.Settings.SelectedProviderId, req.HasImages);
@@ -157,67 +202,229 @@ namespace OMNIX.Core.AiGateway
                     throw;
                 }
 
-                if (response == null || string.IsNullOrEmpty(response.Text))
+                if (response == null)
                 {
-                    visibleDelta.Complete(true, response != null ? response.Text : null);
-                    final = response ?? new ChatResponse { Text = "" };
-                    return final;
+                    visibleDelta.Complete(true, null);
+                    Logger.Gateway("Provider returned null response; mutationRequested=" + mutationRequested);
+                    if (mutationRequested && !writeAttempted)
+                    {
+                        if (mutationRepairTurns++ < MaxMutationRepairTurns)
+                        {
+                            history.Add(current);
+                            current = MutationRepairTurn(runtimePreflight,
+                                "The provider returned no response and no write tool was attempted.");
+                            continue;
+                        }
+                        return MutationRuntimeFailure("The selected model/provider returned no executable write tool call. No Office changes were made.");
+                    }
+                    return new ChatResponse { Text = "" };
                 }
 
-                var call = ToolCallParser.Parse(response.Text);
-                // If there is no internal tool call, flush the small held-back suffix and keep
-                // ordinary network streaming. If there is a tool call, the protocol suffix stays
-                // suppressed and only the later user-facing answer reaches the chat bubble.
-                visibleDelta.Complete(call == null, response.Text);
+                ToolCall call = null;
+                string responseKind = "final_text";
+
+                if (response.HasToolCalls)
+                {
+                    visibleDelta.Complete(true, response.Text);
+                    responseKind = "native_tool_call";
+                    Logger.Gateway("Provider response_kind=native_tool_call; count=" + response.ToolCalls.Count);
+
+                    if (response.ToolCalls.Count != 1)
+                    {
+                        Logger.Gateway("Tool protocol rejected: reason=multiple_native_calls; count=" + response.ToolCalls.Count);
+                        if (protocolRepairTurns++ < MaxProtocolRepairTurns)
+                        {
+                            history.Add(current);
+                            history.Add(new ChatTurn
+                            {
+                                Role = ChatRole.Assistant,
+                                Text = SafeAssistantTrace(response, "Provider returned multiple native tool calls."),
+                                TimestampUtc = DateTime.UtcNow
+                            });
+                            current = ProtocolRepairTurn("Return exactly ONE OMNIX tool call in this turn. Do not issue parallel tool calls.");
+                            continue;
+                        }
+                        return MutationRuntimeFailure("The selected model repeatedly returned multiple parallel tool calls. OMNIX executes one verified Office operation at a time, so nothing unsafe was applied.");
+                    }
+
+                    var providerCall = response.ToolCalls[0];
+                    call = new ToolCall
+                    {
+                        Name = ToolNames.Normalize(providerCall != null ? providerCall.Name : ""),
+                        ArgumentsJson = providerCall != null ? providerCall.ArgumentsJson : "{}"
+                    };
+                }
+                else
+                {
+                    call = ToolCallParser.Parse(response.Text ?? "");
+                    if (call != null)
+                    {
+                        call.Name = ToolNames.Normalize(call.Name);
+                        responseKind = "text_tool_call";
+                    }
+                    visibleDelta.Complete(call == null, response.Text);
+                    Logger.Gateway("Provider response_kind=" + responseKind);
+                }
+
+                if (call != null)
+                {
+                    string argumentError;
+                    if (!TryValidateToolArguments(call.ArgumentsJson, out argumentError))
+                    {
+                        Logger.Gateway("Tool protocol rejected: reason=malformed_arguments; tool=" +
+                                       SafeToolName(call.Name) + "; detail=" + argumentError);
+                        if (protocolRepairTurns++ < MaxProtocolRepairTurns)
+                        {
+                            history.Add(current);
+                            history.Add(new ChatTurn
+                            {
+                                Role = ChatRole.Assistant,
+                                Text = SafeAssistantTrace(response, "Provider returned malformed tool arguments."),
+                                TimestampUtc = DateTime.UtcNow
+                            });
+                            current = ProtocolRepairTurn(
+                                "Your last OMNIX tool arguments were malformed. Return exactly one tool call with a valid JSON OBJECT for args. Do not include commentary inside the arguments.");
+                            continue;
+                        }
+                        return MutationRuntimeFailure("The selected model repeatedly produced malformed tool arguments. No unverified Office write was applied.");
+                    }
+
+                    Logger.Gateway("Tool parsed: source=" + responseKind + "; tool=" + SafeToolName(call.Name) +
+                                   "; whitelisted=" + ToolNames.IsWhitelisted(call.Name) +
+                                   "; write=" + ToolNames.IsWriteTool(call.Name));
+                }
 
                 if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text))
                 {
                     accessClarified = true;
-                    var access = await toolExecutor.ExecuteAsync(new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" }, hostAdapter).ConfigureAwait(true);
+                    var access = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" },
+                        hostAdapter).ConfigureAwait(true);
                     history.Add(current);
-                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
-                    current = new ChatTurn { Role = ChatRole.User, TimestampUtc = DateTime.UtcNow,
-                        Text = "OMNIX RUNTIME ACCESS CHECK: " + access.ContentForModel +
-                        "\nYour previous access claim was not backed by a write tool result. Use this measured state. If the original user requested a change and the relevant target is available, invoke its documented tool through normal confirmation. Otherwise report the specific measured blocker or uncertainty. Do not invent a permission problem, do not bypass protection, and do not claim completion without a tool result." };
+                    history.Add(new ChatTurn
+                    {
+                        Role = ChatRole.Assistant,
+                        Text = SafeAssistantTrace(response, "Provider made an unverified Office access claim."),
+                        TimestampUtc = DateTime.UtcNow
+                    });
+                    current = new ChatTurn
+                    {
+                        Role = ChatRole.User,
+                        TimestampUtc = DateTime.UtcNow,
+                        Text = "OMNIX RUNTIME ACCESS CHECK: " + SafeRuntimeSummary(access.ContentForModel, 1800) +
+                               "\nYour previous access claim was not backed by a write tool result. Use this measured state. " +
+                               "If the original user requested a change and the target is writable, invoke exactly one documented tool now. " +
+                               "Do not invent a permission problem and do not provide VBA/manual instructions as a substitute for execution."
+                    };
                     continue;
                 }
 
                 if (call == null)
                 {
-                    Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted + "; accessClarified=" + accessClarified);
+                    if (mutationRequested && !writeAttempted)
+                    {
+                        Logger.Gateway("Mutation enforcement: text-only response before any write; repairTurn=" + mutationRepairTurns);
+                        if (mutationRepairTurns++ < MaxMutationRepairTurns)
+                        {
+                            history.Add(current);
+                            history.Add(new ChatTurn
+                            {
+                                Role = ChatRole.Assistant,
+                                Text = SafeAssistantTrace(response, "Provider returned text without executing the requested Office change."),
+                                TimestampUtc = DateTime.UtcNow
+                            });
+                            current = MutationRepairTurn(runtimePreflight,
+                                "The original user request requires a real Office change, but you returned text without invoking a write tool.");
+                            continue;
+                        }
+
+                        return MutationRuntimeFailure(
+                            "The selected model/provider did not produce a valid OMNIX write tool call after bounded repair attempts. No Office changes were made. Try a model verified for tool calling.");
+                    }
+
+                    if (mutationRequested && writeAttempted && !writeSucceeded)
+                    {
+                        return MutationRuntimeFailure(
+                            "OMNIX attempted the requested Office write, but no write completed successfully. " +
+                            (string.IsNullOrWhiteSpace(lastWriteFailure) ? "No verified change was applied." : "Last write result: " + lastWriteFailure));
+                    }
+
+                    Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted +
+                                   "; successfulWrites=" + successfulWrites + "; failedWrites=" + failedWrites +
+                                   "; accessClarified=" + accessClarified);
+
+                    if (mutationRequested && failedWrites > 0 && successfulWrites > 0)
+                    {
+                        string suffix = "\n\nOMNIX runtime verification: " + successfulWrites +
+                                        " write operation(s) succeeded and " + failedWrites +
+                                        " write operation(s) failed or were cancelled. Treat the task as partially complete unless all requested steps were verified.";
+                        return new ChatResponse { Text = (response.Text ?? "") + suffix, Model = response.Model };
+                    }
+
                     final = response;
                     return final;
                 }
 
                 if (!ToolNames.IsWhitelisted(call.Name))
                 {
-                    string note = string.Format(Localization.Strings.T("S.Tools.UnknownTool"), call.Name);
-                    history.Add(current);
-                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
-                    current = new ChatTurn
+                    Logger.Gateway("Tool protocol rejected: reason=not_whitelisted; tool=" + SafeToolName(call.Name));
+                    if (protocolRepairTurns++ < MaxProtocolRepairTurns)
                     {
-                        Role = ChatRole.User,
-                        Text = "OMNIX TOOL RESULT: " + note,
-                        TimestampUtc = DateTime.UtcNow
-                    };
-                    continue;
+                        history.Add(current);
+                        history.Add(new ChatTurn
+                        {
+                            Role = ChatRole.Assistant,
+                            Text = SafeAssistantTrace(response, "Provider requested a non-whitelisted tool."),
+                            TimestampUtc = DateTime.UtcNow
+                        });
+                        current = ProtocolRepairTurn(
+                            "The requested tool is not in the OMNIX hard whitelist. Use list_office_capabilities for advanced Office operations, or choose one exact documented OMNIX tool. Do not invent tool names.");
+                        continue;
+                    }
+
+                    return MutationRuntimeFailure(
+                        "The selected model repeatedly requested a tool that is not in the OMNIX whitelist. Nothing outside the approved Office capability surface was executed.");
                 }
 
-                if (ToolNames.IsWriteTool(call.Name)) writeAttempted = true;
+                bool isWrite = ToolNames.IsWriteTool(call.Name);
+                if (isWrite) writeAttempted = true;
+
                 ToolResult result = await toolExecutor.ExecuteAsync(call, hostAdapter).ConfigureAwait(true);
+                if (isWrite)
+                {
+                    if (result != null && result.Success)
+                    {
+                        writeSucceeded = true;
+                        successfulWrites++;
+                        lastWriteFailure = null;
+                    }
+                    else
+                    {
+                        failedWrites++;
+                        lastWriteFailure = SafeRuntimeSummary(result != null ? result.ContentForModel : "No tool result.", 900);
+                    }
+                }
+
+                Logger.Gateway("Tool completed: tool=" + SafeToolName(call.Name) +
+                               "; success=" + (result != null && result.Success) +
+                               "; successfulWrites=" + successfulWrites + "; failedWrites=" + failedWrites);
+
                 history.Add(current);
-                // The provider needs its tool-request text in internal conversation history, even
-                // though the fenced protocol was intentionally hidden from the visible chat UI.
-                history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
+                history.Add(new ChatTurn
+                {
+                    Role = ChatRole.Assistant,
+                    Text = SafeAssistantTrace(response, "OMNIX invoked tool " + SafeToolName(call.Name) + "."),
+                    TimestampUtc = DateTime.UtcNow
+                });
 
                 var toolResultTurn = new ChatTurn
                 {
                     Role = ChatRole.User,
-                    Text = "OMNIX TOOL RESULT: " + result.ContentForModel,
+                    Text = "OMNIX TOOL RESULT: " + (result != null ? result.ContentForModel : "No result returned."),
                     TimestampUtc = DateTime.UtcNow
                 };
 
-                if (result.CapturedPng != null && result.CapturedPng.Length > 0)
+                if (result != null && result.CapturedPng != null && result.CapturedPng.Length > 0)
                 {
                     toolResultTurn.Images = new List<ImageAttachment>
                     {
@@ -239,6 +446,95 @@ namespace OMNIX.Core.AiGateway
                 final = new ChatResponse { Text = string.Empty };
             // Never return the last internal tool call as if it were a completed user answer.
             return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
+        }
+
+        private static bool TryValidateToolArguments(string json, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(json)) return true;
+            if (json.Length > 64 * 1024)
+            {
+                error = "arguments_too_large";
+                return false;
+            }
+            if (string.Equals(json, "__MALFORMED_NATIVE_TOOL_ARGUMENTS__", StringComparison.Ordinal))
+            {
+                error = "provider_native_arguments_malformed";
+                return false;
+            }
+            try
+            {
+                JObject.Parse(json);
+                return true;
+            }
+            catch
+            {
+                error = "arguments_not_json_object";
+                return false;
+            }
+        }
+
+        private static ChatTurn MutationRepairTurn(string runtimePreflight, string reason)
+        {
+            return new ChatTurn
+            {
+                Role = ChatRole.User,
+                TimestampUtc = DateTime.UtcNow,
+                Text = "OMNIX RUNTIME MUTATION REQUIRED: " + reason +
+                       "\nThe user's original request requires an actual change inside the active Office document. " +
+                       "Invoke exactly ONE appropriate OMNIX write tool now. You may use a read tool first only when required to target the change correctly. " +
+                       "Do not answer with a manual table, VBA, generic instructions, or an invented permission limitation. " +
+                       "A task is complete only after a write tool succeeds and the affected Office state is verified." +
+                       (string.IsNullOrWhiteSpace(runtimePreflight) ? "" :
+                           "\nMeasured preflight: " + SafeRuntimeSummary(runtimePreflight, 2600))
+            };
+        }
+
+        private static ChatTurn ProtocolRepairTurn(string instruction)
+        {
+            return new ChatTurn
+            {
+                Role = ChatRole.User,
+                TimestampUtc = DateTime.UtcNow,
+                Text = "OMNIX RUNTIME TOOL-PROTOCOL REPAIR: " + instruction +
+                       "\nReturn one valid approved tool call. Do not claim success until its result is returned."
+            };
+        }
+
+        private static ChatResponse MutationRuntimeFailure(string message)
+        {
+            return new ChatResponse
+            {
+                Text = "OMNIX runtime stopped safely: " + message,
+                Model = null
+            };
+        }
+
+        private static string SafeAssistantTrace(ChatResponse response, string fallback)
+        {
+            string text = response != null ? response.Text : null;
+            if (string.IsNullOrWhiteSpace(text)) return fallback ?? "[No assistant text]";
+            return text.Length <= 6000 ? text : text.Substring(0, 6000) + "\n[OMNIX: assistant trace truncated]";
+        }
+
+        private static string SafeRuntimeSummary(string value, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "(none)";
+            string text = value.Replace("\0", "");
+            return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "…";
+        }
+
+        private static string SafeToolName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "(empty)";
+            var sb = new StringBuilder();
+            foreach (char ch in value.Trim())
+            {
+                if (sb.Length >= 80) break;
+                if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.' || ch == ':' || ch == '/')
+                    sb.Append(ch);
+            }
+            return sb.Length == 0 ? "(invalid)" : sb.ToString();
         }
 
         private bool ShouldSuggestAlternative(OmnixException ex)
@@ -361,6 +657,45 @@ namespace OMNIX.Core.AiGateway
             return SystemPromptBuilder.Build(hostAdapter, context);
         }
     }
+
+    internal static class MutationIntentDetector
+    {
+        private static readonly string[] NegativeMarkers =
+        {
+            "do not make any changes", "don't make any changes", "do not modify anything",
+            "don't modify anything", "read only", "review only", "inspect only",
+            "هیچ تغییری نده", "هیچ چیزی را تغییر نده", "فقط بررسی کن", "فقط بخوان",
+            "فقط تحلیل کن", "نساز", "چیزی نساز"
+        };
+
+        private static readonly string[] MutationMarkers =
+        {
+            " create ", " build ", " make ", " add ", " insert ", " write ", " edit ", " update ",
+            " change ", " delete ", " remove ", " format ", " rename ", " sort ", " filter ",
+            " merge ", " generate ", " construct ", " fill ", " populate ",
+            "بساز", "ساخته", "ایجاد کن", "ایجاد شود", "اضافه کن", "وارد کن", "بنویس",
+            "ویرایش کن", "تغییر بده", "تغییر کن", "حذف کن", "فرمت کن", "مرتب کن",
+            "نام‌گذاری", "نامگذاری", "پر کن", "فورمول", "فرمول", "شیت بساز", "جدول بساز",
+            "دیتابیس بساز", "گزارش بساز"
+        };
+
+        public static bool IsLikelyMutation(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string normalized = " " + text.Replace('ي', 'ی').Replace('ك', 'ک').ToLowerInvariant() + " ";
+
+            foreach (string marker in NegativeMarkers)
+                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return false;
+
+            foreach (string marker in MutationMarkers)
+                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+
+            return false;
+        }
+    }
+
 
     /// <summary>
     /// Streaming protocol filter. It preserves ordinary token streaming while holding a tiny suffix

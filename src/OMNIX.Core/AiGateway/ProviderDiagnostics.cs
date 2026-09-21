@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Storage;
+using OMNIX.Core.Tools;
+using Newtonsoft.Json.Linq;
 
 namespace OMNIX.Core.AiGateway
 {
@@ -35,6 +37,7 @@ namespace OMNIX.Core.AiGateway
     public enum ModelVerificationState
     {
         Working,
+        TextOnly,
         AccessDenied,
         NotFoundOrUnavailable,
         RateLimited,
@@ -52,8 +55,10 @@ namespace OMNIX.Core.AiGateway
         public ErrorCode ErrorCode { get; set; }
         public long LatencyMs { get; set; }
         public string Summary { get; set; }
+        public bool ToolCallingVerified { get; set; }
+        public string ToolTransport { get; set; }
 
-        public bool Working { get { return State == ModelVerificationState.Working; } }
+        public bool Working { get { return State == ModelVerificationState.Working && ToolCallingVerified; } }
     }
 
     /// <summary>
@@ -175,18 +180,56 @@ namespace OMNIX.Core.AiGateway
             var adapter = registry.Get(providerId);
             if (adapter == null) throw OmnixException.Provider("Unknown provider: " + providerId);
 
+            adapter.Configure(CloneCredentials(credentials, model));
+            if (adapter.Info.Kind == ProviderKind.Cloud &&
+                Settings.SettingsManager.Instance.Settings.Privacy == Settings.PrivacyMode.LocalOnly)
+                throw OmnixException.PrivacyBlocked("Local Only is enabled. Select a local provider or change Privacy.");
+
             var sw = Stopwatch.StartNew();
             try
             {
-                await TestSyntheticModelAsync(adapter, CloneCredentials(credentials, model), ct).ConfigureAwait(false);
+                ToolProbeResult probe = await ProbeOmnixToolCallingAsync(adapter, ct).ConfigureAwait(false);
                 sw.Stop();
+
+                if (probe.Verified)
+                {
+                    return new ModelVerificationResult
+                    {
+                        ModelId = model,
+                        State = ModelVerificationState.Working,
+                        ErrorCode = ErrorCode.None,
+                        LatencyMs = sw.ElapsedMilliseconds,
+                        ToolCallingVerified = true,
+                        ToolTransport = probe.Transport,
+                        Summary = "Working — OMNIX tool calling verified via " + probe.Transport +
+                                  " in " + sw.ElapsedMilliseconds + " ms."
+                    };
+                }
+
+                if (probe.ReturnedText)
+                {
+                    return new ModelVerificationResult
+                    {
+                        ModelId = model,
+                        State = ModelVerificationState.TextOnly,
+                        ErrorCode = ErrorCode.None,
+                        LatencyMs = sw.ElapsedMilliseconds,
+                        ToolCallingVerified = false,
+                        ToolTransport = "none",
+                        Summary = "Text inference works, but OMNIX tool calling was NOT verified. " +
+                                  "This model may chat normally but is not verified for Excel/Word/PowerPoint actions."
+                    };
+                }
+
                 return new ModelVerificationResult
                 {
                     ModelId = model,
-                    State = ModelVerificationState.Working,
-                    ErrorCode = ErrorCode.None,
+                    State = ModelVerificationState.Incompatible,
+                    ErrorCode = ErrorCode.PROVIDER_ERROR,
                     LatencyMs = sw.ElapsedMilliseconds,
-                    Summary = "Working — text inference succeeded in " + sw.ElapsedMilliseconds + " ms."
+                    ToolCallingVerified = false,
+                    ToolTransport = "none",
+                    Summary = "The model returned neither a valid OMNIX tool call nor useful text."
                 };
             }
             catch (OperationCanceledException) { throw; }
@@ -194,6 +237,82 @@ namespace OMNIX.Core.AiGateway
             {
                 sw.Stop();
                 return ClassifyModelFailure(model, ex, sw.ElapsedMilliseconds);
+            }
+        }
+
+        private sealed class ToolProbeResult
+        {
+            public bool Verified;
+            public bool ReturnedText;
+            public string Transport;
+        }
+
+        private static async Task<ToolProbeResult> ProbeOmnixToolCallingAsync(
+            IProviderAdapter adapter,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            var response = await adapter.SendAsync(new ChatRequest
+            {
+                UseNativeTools = true,
+                SystemPrompt =
+                    "OMNIX PROVIDER CAPABILITY TEST. Do not use Office document data. " +
+                    "Call exactly one OMNIX tool: read_office_access with an empty JSON object for args. " +
+                    "If native function/tool calling is unavailable, return exactly one OMNIX text-protocol tool block: " +
+                    "<tool_call>omnix_tool {\"tool\":\"read_office_access\",\"args\":{}}</tool_call>. " +
+                    "Do not answer with prose.",
+                UserTurn = new ChatTurn
+                {
+                    Role = ChatRole.User,
+                    Text = "Run the safe OMNIX read_office_access capability probe now.",
+                    TimestampUtc = DateTime.UtcNow
+                }
+            }, null, ct).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+            if (response == null)
+                return new ToolProbeResult { Verified = false, ReturnedText = false, Transport = "none" };
+
+            if (response.HasToolCalls && response.ToolCalls.Count == 1)
+            {
+                var native = response.ToolCalls[0];
+                string name = ToolNames.Normalize(native != null ? native.Name : "");
+                if (string.Equals(name, ToolNames.ReadOfficeAccess, StringComparison.Ordinal))
+                {
+                    JObject ignored;
+                    if (TryParseObject(native != null ? native.ArgumentsJson : "{}", out ignored))
+                        return new ToolProbeResult { Verified = true, ReturnedText = false, Transport = "native" };
+                }
+            }
+
+            ToolCall textCall = ToolCallParser.Parse(response.Text ?? "");
+            if (textCall != null &&
+                string.Equals(ToolNames.Normalize(textCall.Name), ToolNames.ReadOfficeAccess, StringComparison.Ordinal))
+            {
+                JObject ignored;
+                if (TryParseObject(textCall.ArgumentsJson, out ignored))
+                    return new ToolProbeResult { Verified = true, ReturnedText = false, Transport = "text-fallback" };
+            }
+
+            return new ToolProbeResult
+            {
+                Verified = false,
+                ReturnedText = !string.IsNullOrWhiteSpace(response.Text),
+                Transport = "none"
+            };
+        }
+
+        private static bool TryParseObject(string json, out JObject value)
+        {
+            try
+            {
+                value = string.IsNullOrWhiteSpace(json) ? new JObject() : JObject.Parse(json);
+                return true;
+            }
+            catch
+            {
+                value = null;
+                return false;
             }
         }
 
@@ -351,6 +470,7 @@ namespace OMNIX.Core.AiGateway
             string label;
             switch (state)
             {
+                case ModelVerificationState.TextOnly: label = "text works; OMNIX tools not verified"; break;
                 case ModelVerificationState.AccessDenied: label = "access denied"; break;
                 case ModelVerificationState.NotFoundOrUnavailable: label = "model unavailable"; break;
                 case ModelVerificationState.RateLimited: label = "rate/quota limited"; break;

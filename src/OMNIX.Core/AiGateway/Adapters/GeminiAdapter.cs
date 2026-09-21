@@ -11,6 +11,8 @@ using Newtonsoft.Json.Linq;
 using OMNIX.Core.AiGateway.Http;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Storage;
+using OMNIX.Core.Tools;
+using OMNIX.Core.Logging;
 
 namespace OMNIX.Core.AiGateway.Adapters
 {
@@ -74,6 +76,70 @@ namespace OMNIX.Core.AiGateway.Adapters
             return new JObject { { "parts", parts } };
         }
 
+        private static JObject BuildNativeFunctionDeclaration()
+        {
+            var names = new JArray();
+            foreach (string name in ToolNames.AllWhitelisted) names.Add(name);
+            return new JObject
+            {
+                { "name", "omnix_tool" },
+                { "description", "Execute exactly one approved OMNIX Office tool. Use one tool call per turn." },
+                { "parameters", new JObject
+                    {
+                        { "type", "OBJECT" },
+                        { "properties", new JObject
+                            {
+                                { "tool", new JObject
+                                    {
+                                        { "type", "STRING" },
+                                        { "enum", names },
+                                        { "description", "Exact OMNIX tool name from the hard whitelist." }
+                                    }
+                                },
+                                { "args_json", new JObject
+                                    {
+                                        { "type", "STRING" },
+                                        { "description", "Compact valid JSON object containing the arguments for the selected OMNIX tool." }
+                                    }
+                                }
+                            }
+                        },
+                        { "required", new JArray("tool", "args_json") }
+                    }
+                }
+            };
+        }
+
+        private static ProviderToolCall DecodeGeminiFunctionCall(JObject call)
+        {
+            if (call == null) return null;
+            string functionName = (string)call["name"] ?? "";
+            var args = call["args"] as JObject ?? new JObject();
+
+            if (string.Equals(functionName, "omnix_tool", StringComparison.OrdinalIgnoreCase))
+            {
+                string tool = ToolNames.Normalize((string)args["tool"] ?? "");
+                string argsJson = (string)args["args_json"];
+                if (string.IsNullOrWhiteSpace(argsJson) && args["args"] != null)
+                    argsJson = args["args"].Type == JTokenType.String
+                        ? (string)args["args"]
+                        : args["args"].ToString(Formatting.None);
+                return new ProviderToolCall
+                {
+                    Id = "",
+                    Name = tool,
+                    ArgumentsJson = string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson
+                };
+            }
+
+            return new ProviderToolCall
+            {
+                Id = "",
+                Name = ToolNames.Normalize(functionName),
+                ArgumentsJson = args.ToString(Formatting.None)
+            };
+        }
+
         public string BuildPayload(ChatRequest request, bool stream)
         {
             request = ChatRequestBudgeter.Apply(request);
@@ -99,6 +165,22 @@ namespace OMNIX.Core.AiGateway.Adapters
                 {
                     { "parts", new JArray { new JObject { { "text", request.SystemPrompt } } } }
                 };
+
+            if (request.UseNativeTools)
+            {
+                payload["tools"] = new JArray
+                {
+                    new JObject
+                    {
+                        { "functionDeclarations", new JArray(BuildNativeFunctionDeclaration()) }
+                    }
+                };
+                payload["toolConfig"] = new JObject
+                {
+                    { "functionCallingConfig", new JObject { { "mode", "AUTO" } } }
+                };
+            }
+
             return payload.ToString(Formatting.None);
         }
 
@@ -110,6 +192,38 @@ namespace OMNIX.Core.AiGateway.Adapters
             if (string.IsNullOrWhiteSpace(Model))
                 throw OmnixException.Model("Select a Gemini model from Load Models or enter a model ID before sending.");
 
+            try
+            {
+                return await SendOnceAsync(request, onDelta, ct).ConfigureAwait(false);
+            }
+            catch (OmnixException ex)
+            {
+                if (request != null && request.UseNativeTools && IsNativeToolSchemaRejection(ex))
+                {
+                    Logger.Gateway("Gemini rejected native function declarations; retrying this provider turn with OMNIX text-protocol fallback.");
+                    var fallback = new ChatRequest
+                    {
+                        SystemPrompt = request.SystemPrompt,
+                        History = request.History,
+                        UserTurn = request.UserTurn,
+                        UseNativeTools = false
+                    };
+                    return await SendOnceAsync(fallback, onDelta, ct).ConfigureAwait(false);
+                }
+                throw;
+            }
+        }
+
+        private static bool IsNativeToolSchemaRejection(OmnixException ex)
+        {
+            if (ex == null || ex.Code != ErrorCode.PROVIDER_ERROR) return false;
+            string details = ex.TechnicalDetails ?? "";
+            return details.IndexOf("HTTP=400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   details.IndexOf("HTTP=422", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private async Task<ChatResponse> SendOnceAsync(ChatRequest request, Action<string> onDelta, CancellationToken ct)
+        {
             string url = Base + "/models/" + Uri.EscapeDataString(Model) +
                          (onDelta != null ? ":streamGenerateContent?alt=sse" : ":generateContent");
 
@@ -129,17 +243,27 @@ namespace OMNIX.Core.AiGateway.Adapters
                         }
 
                         var sb = new StringBuilder();
+                        var nativeCalls = new List<ProviderToolCall>();
                         if (onDelta == null)
                         {
                             string full = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
                             var root = JObject.Parse(full);
-                            foreach (var part in root.SelectTokens("candidates[0].content.parts[*]"))
+                            foreach (JObject part in root.SelectTokens("candidates[0].content.parts[*]").OfType<JObject>())
                             {
                                 string text = (string)part["text"];
-                                if (string.IsNullOrEmpty(text)) continue;
-                                if (sb.Length + text.Length > MaxAssistantChars)
-                                    throw OmnixException.Provider("Gemini returned an over-sized assistant response.");
-                                sb.Append(text);
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    if (sb.Length + text.Length > MaxAssistantChars)
+                                        throw OmnixException.Provider("Gemini returned an over-sized assistant response.");
+                                    sb.Append(text);
+                                }
+
+                                var functionCall = part["functionCall"] as JObject;
+                                if (functionCall != null)
+                                {
+                                    var decoded = DecodeGeminiFunctionCall(functionCall);
+                                    if (decoded != null) nativeCalls.Add(decoded);
+                                }
                             }
                         }
                         else
@@ -151,7 +275,8 @@ namespace OMNIX.Core.AiGateway.Adapters
                                     JObject chunk;
                                     try { chunk = JObject.Parse(data); }
                                     catch { continue; }
-                                    foreach (var part in chunk.SelectTokens("candidates[0].content.parts[*]"))
+
+                                    foreach (JObject part in chunk.SelectTokens("candidates[0].content.parts[*]").OfType<JObject>())
                                     {
                                         string delta = (string)part["text"];
                                         if (!string.IsNullOrEmpty(delta))
@@ -161,11 +286,30 @@ namespace OMNIX.Core.AiGateway.Adapters
                                             sb.Append(delta);
                                             onDelta(delta);
                                         }
+
+                                        var functionCall = part["functionCall"] as JObject;
+                                        if (functionCall != null)
+                                        {
+                                            var decoded = DecodeGeminiFunctionCall(functionCall);
+                                            if (decoded != null &&
+                                                !nativeCalls.Any(x => string.Equals(x.Name, decoded.Name, StringComparison.Ordinal) &&
+                                                                      string.Equals(x.ArgumentsJson, decoded.ArgumentsJson, StringComparison.Ordinal)))
+                                                nativeCalls.Add(decoded);
+                                        }
                                     }
                                 }
                             }
                         }
-                        return new ChatResponse { Text = sb.ToString(), Model = Model };
+
+                        if (nativeCalls.Count > 0)
+                            Logger.Gateway("Gemini response contains native tool call(s): count=" + nativeCalls.Count);
+
+                        return new ChatResponse
+                        {
+                            Text = sb.ToString(),
+                            Model = Model,
+                            ToolCalls = nativeCalls.Count > 0 ? nativeCalls : null
+                        };
                     }
                 }
             }

@@ -21,6 +21,12 @@ namespace OMNIX.Core.AiGateway
         public List<ChatTurn> History { get; set; }
         public ChatTurn UserTurn { get; set; }
 
+        /// <summary>
+        /// True only for the Office execution loop. Diagnostics/connection tests leave this false,
+        /// so synthetic provider checks cannot unexpectedly invoke Office tools.
+        /// </summary>
+        public bool UseNativeTools { get; set; }
+
         public bool HasImages
         {
             get
@@ -34,11 +40,24 @@ namespace OMNIX.Core.AiGateway
         }
     }
 
+    public sealed class ProviderToolCall
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string ArgumentsJson { get; set; }
+    }
+
     public sealed class ChatResponse
     {
         public string Text { get; set; }
         public string Model { get; set; }
         public bool WasCancelled { get; set; }
+        public List<ProviderToolCall> ToolCalls { get; set; }
+
+        public bool HasToolCalls
+        {
+            get { return ToolCalls != null && ToolCalls.Count > 0; }
+        }
     }
 
     /// <summary>
@@ -104,7 +123,8 @@ namespace OMNIX.Core.AiGateway
                 SystemPrompt = TruncatePreservingEnds(source.SystemPrompt, MaxSystemPromptChars),
                 History = BuildBoundedHistory(source.History, maxTurns, maxHistoryChars,
                     source.UserTurn != null ? source.UserTurn.Text : null),
-                UserTurn = CloneCurrentTurn(source.UserTurn)
+                UserTurn = CloneCurrentTurn(source.UserTurn),
+                UseNativeTools = source.UseNativeTools
             };
             return result;
         }

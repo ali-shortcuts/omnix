@@ -10,6 +10,8 @@ using Newtonsoft.Json.Linq;
 using OMNIX.Core.AiGateway.Http;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Storage;
+using OMNIX.Core.Tools;
+using OMNIX.Core.Logging;
 
 namespace OMNIX.Core.AiGateway.Adapters
 {
@@ -91,6 +93,68 @@ namespace OMNIX.Core.AiGateway.Adapters
             return msg;
         }
 
+        private static JObject BuildNativeTool()
+        {
+            var names = new JArray();
+            foreach (string name in ToolNames.AllWhitelisted) names.Add(name);
+            return new JObject
+            {
+                { "type", "function" },
+                { "function", new JObject
+                    {
+                        { "name", "omnix_tool" },
+                        { "description", "Execute exactly one approved OMNIX Office tool. Use one tool call per turn." },
+                        { "parameters", new JObject
+                            {
+                                { "type", "object" },
+                                { "properties", new JObject
+                                    {
+                                        { "tool", new JObject { { "type", "string" }, { "enum", names } } },
+                                        { "args", new JObject { { "type", "object" } } }
+                                    }
+                                },
+                                { "required", new JArray("tool", "args") }
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        private static ProviderToolCall DecodeOllamaToolCall(JObject call)
+        {
+            if (call == null) return null;
+            string functionName = (string)call.SelectToken("function.name") ?? "";
+            JToken arguments = call.SelectToken("function.arguments");
+
+            if (string.Equals(functionName, "omnix_tool", StringComparison.OrdinalIgnoreCase))
+            {
+                var root = arguments as JObject;
+                if (root == null && arguments != null && arguments.Type == JTokenType.String)
+                {
+                    try { root = JObject.Parse((string)arguments); } catch { }
+                }
+                root = root ?? new JObject();
+                string tool = ToolNames.Normalize((string)root["tool"] ?? "");
+                JToken args = root["args"];
+                return new ProviderToolCall
+                {
+                    Id = "",
+                    Name = tool,
+                    ArgumentsJson = args == null ? "{}" :
+                        args.Type == JTokenType.String ? (string)args : args.ToString(Formatting.None)
+                };
+            }
+
+            return new ProviderToolCall
+            {
+                Id = "",
+                Name = ToolNames.Normalize(functionName),
+                ArgumentsJson = arguments == null ? "{}" :
+                    arguments.Type == JTokenType.String ? (string)arguments : arguments.ToString(Formatting.None)
+            };
+        }
+
         public string BuildPayload(ChatRequest request)
         {
             request = ChatRequestBudgeter.Apply(request);
@@ -110,10 +174,44 @@ namespace OMNIX.Core.AiGateway.Adapters
                 { "messages", messages },
                 { "stream", true }
             };
+            if (request.UseNativeTools)
+                payload["tools"] = new JArray(BuildNativeTool());
             return payload.ToString(Formatting.None);
         }
 
         public async Task<ChatResponse> SendAsync(ChatRequest request, Action<string> onDelta, CancellationToken ct)
+        {
+            try
+            {
+                return await SendOnceAsync(request, onDelta, ct).ConfigureAwait(false);
+            }
+            catch (OmnixException ex)
+            {
+                if (request != null && request.UseNativeTools && IsNativeToolSchemaRejection(ex))
+                {
+                    Logger.Gateway("Ollama rejected native tool schema; retrying this turn with OMNIX text-protocol fallback.");
+                    var fallback = new ChatRequest
+                    {
+                        SystemPrompt = request.SystemPrompt,
+                        History = request.History,
+                        UserTurn = request.UserTurn,
+                        UseNativeTools = false
+                    };
+                    return await SendOnceAsync(fallback, onDelta, ct).ConfigureAwait(false);
+                }
+                throw;
+            }
+        }
+
+        private static bool IsNativeToolSchemaRejection(OmnixException ex)
+        {
+            if (ex == null || ex.Code != ErrorCode.PROVIDER_ERROR) return false;
+            string details = ex.TechnicalDetails ?? "";
+            return details.IndexOf("HTTP=400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   details.IndexOf("HTTP=422", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private async Task<ChatResponse> SendOnceAsync(ChatRequest request, Action<string> onDelta, CancellationToken ct)
         {
             try
             {
@@ -130,6 +228,7 @@ namespace OMNIX.Core.AiGateway.Adapters
                         }
 
                         var sb = new StringBuilder();
+                        var nativeCalls = new List<ProviderToolCall>();
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         {
                             foreach (string line in SseLineReader.ReadNdjsonLines(stream, ct))
@@ -146,10 +245,33 @@ namespace OMNIX.Core.AiGateway.Adapters
                                     sb.Append(delta);
                                     if (onDelta != null) onDelta(delta);
                                 }
+
+                                var toolCalls = obj.SelectToken("message.tool_calls") as JArray;
+                                if (toolCalls != null)
+                                {
+                                    foreach (JObject toolCall in toolCalls.OfType<JObject>())
+                                    {
+                                        var decoded = DecodeOllamaToolCall(toolCall);
+                                        if (decoded != null &&
+                                            !nativeCalls.Any(x => string.Equals(x.Name, decoded.Name, StringComparison.Ordinal) &&
+                                                                  string.Equals(x.ArgumentsJson, decoded.ArgumentsJson, StringComparison.Ordinal)))
+                                            nativeCalls.Add(decoded);
+                                    }
+                                }
+
                                 if ((bool?)obj["done"] == true) break;
                             }
                         }
-                        return new ChatResponse { Text = sb.ToString(), Model = Model };
+
+                        if (nativeCalls.Count > 0)
+                            Logger.Gateway("Ollama response contains native tool call(s): count=" + nativeCalls.Count);
+
+                        return new ChatResponse
+                        {
+                            Text = sb.ToString(),
+                            Model = Model,
+                            ToolCalls = nativeCalls.Count > 0 ? nativeCalls : null
+                        };
                     }
                 }
             }

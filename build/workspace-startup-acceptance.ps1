@@ -131,6 +131,47 @@ class WorkspaceStartupRegression {
             return Task.FromResult(new ChatResponse { Text=answer });
         }
     }
+    sealed class NativeWriteProvider : IProviderAdapter {
+        public int Calls;
+        public ProviderInfo Info { get; private set; }
+        public NativeWriteProvider() { Info=new ProviderInfo{Id="custom",DisplayName="Native Fixture",Kind=ProviderKind.Cloud,Vision=VisionSupport.No}; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            if(Calls==1) return Task.FromResult(new ChatResponse {
+                Text="",
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-1", Name="omnix.create_data_table",
+                        ArgumentsJson="{\"sheet\":\"NativeTest\",\"headers\":[\"ID\"],\"rows\":[[1]]}" }
+                }
+            });
+            return Task.FromResult(new ChatResponse { Text="Verified completed" });
+        }
+    }
+
+    static void NativeGatewayRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            var registry=new ProviderRegistry(); var provider=new NativeWriteProvider();
+            var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+            providers.Clear(); providers.Add(provider);
+            var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+            var host=new FakeHost { AllowWrites=true };
+            int confirmations=0;
+            var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
+            var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },
+                host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+            Check(provider.Calls==2,"Native tool response did not continue to final provider turn");
+            Check(confirmations==1 && host.Writes==1,"Native tool call with empty text was not executed through confirmation");
+            Check(result.Text=="Verified completed","Native tool loop did not return final answer");
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
+    }
+
     static void AccessRecoveryRegression() {
         var settings=SettingsManager.Instance.Settings;
         var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
@@ -165,6 +206,11 @@ class WorkspaceStartupRegression {
         Check((bool)claim.Invoke(null,new object[]{"\u062f\u0633\u062a\u0631\u0633\u06cc \u0646\u0648\u0634\u062a\u0646 \u0628\u0647 \u0641\u0627\u06cc\u0644 \u0641\u0639\u0627\u0644 \u062f\u0631 \u0627\u06cc\u0646 \u0646\u0634\u0633\u062a \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0646\u06cc\u0633\u062a"}),"Reported Persian access denial not recognized");
         Check((bool)claim.Invoke(null,new object[]{"Write access is unavailable"}),"English access denial not recognized");
         Check(!(bool)claim.Invoke(null,new object[]{"The table was created"}),"Normal answer misclassified as denial");
+        var detector=typeof(OMNIX.Core.AiGateway.AiGateway).Assembly.GetType("OMNIX.Core.AiGateway.MutationIntentDetector",true);
+        var detect=detector.GetMethod("IsLikelyMutation",BindingFlags.Public|BindingFlags.Static);
+        Check((bool)detect.Invoke(null,new object[]{"در فایل اکسل شیت محصولات را بساز ولی اطلاعات قبلی را حذف نکن"}),"Persian build intent was not enforced");
+        Check(!(bool)detect.Invoke(null,new object[]{"فقط بررسی کن، هیچ تغییری نده"}),"Read-only Persian request misclassified as mutation");
+        Check(ToolNames.Normalize("omnix.write_to_cell")==ToolNames.WriteToCell && ToolNames.Normalize("write-to-cell")==ToolNames.WriteToCell,"Tool namespace normalization failed");
         var map=new ToolCall { Name=ToolNames.ReadDocumentMap,ArgumentsJson="{\"offset\":20}" };
         Check(executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==1,"Map navigation failed");
         var section=new ToolCall { Name=ToolNames.ReadDocumentSection,ArgumentsJson="{}" };
@@ -244,6 +290,48 @@ class WorkspaceStartupRegression {
                 Check(answer.Text=="OK" && (!streaming || text.ToString()=="OK"),"Protocol response parsing failed");
             }
         }
+
+        // Native tool transport contract: real tools/functionDeclarations must cross the provider
+        // boundary and come back as structured ProviderToolCall objects, never only prompt text.
+        foreach(bool anthropic in new[]{false,true}) foreach(bool streaming in new[]{false,true}) {
+            var portPicker=new TcpListener(IPAddress.Loopback,0); portPicker.Start();
+            int port=((IPEndPoint)portPicker.LocalEndpoint).Port; portPicker.Stop();
+            using(var server=new HttpListener()) using(var timeout=new CancellationTokenSource(5000)) {
+                string origin="http://127.0.0.1:"+port; server.Prefixes.Add(origin+"/"); server.Start();
+                var serving=Task.Run(async ()=> {
+                    var context=await server.GetContextAsync();
+                    using(var reader=new StreamReader(context.Request.InputStream)) {
+                        string body=await reader.ReadToEndAsync();
+                        Check(body.Contains("\"tools\"") && body.Contains("omnix_tool") && body.Contains("write_to_cell"),"Native tool schema missing from provider request");
+                    }
+
+                    string reply;
+                    if(!streaming && !anthropic)
+                        reply="{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"call1\",\"type\":\"function\",\"function\":{\"name\":\"omnix_tool\",\"arguments\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}]}}]}";
+                    else if(streaming && !anthropic)
+                        reply="data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call1\",\"function\":{\"name\":\"omnix_tool\",\"arguments\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}]}}]}\n\ndata: [DONE]\n\n";
+                    else if(!streaming)
+                        reply="{\"content\":[{\"type\":\"tool_use\",\"id\":\"tool1\",\"name\":\"omnix_tool\",\"input\":{\"tool\":\"write_to_cell\",\"args\":{\"sheet\":\"Sheet1\",\"address\":\"B2\",\"value\":42}}}]}";
+                    else
+                        reply="data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool1\",\"name\":\"omnix_tool\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n";
+
+                    byte[] bytes=Encoding.UTF8.GetBytes(reply);
+                    context.Response.ContentType=streaming?"text/event-stream":"application/json";
+                    context.Response.ContentLength64=bytes.Length;
+                    await context.Response.OutputStream.WriteAsync(bytes,0,bytes.Length);
+                    context.Response.Close();
+                });
+
+                var client=new OpenAiCompatibleClient(origin+"/v1","Fixture",null,anthropic);
+                Action<string> delta=streaming ? new Action<string>(x=>{}) : null;
+                var answer=client.SendAsync(
+                    new ChatRequest{UseNativeTools=true,UserTurn=new ChatTurn{Role=ChatRole.User,Text="Create it."}},
+                    "fixture-key","fixture-model",delta,timeout.Token).GetAwaiter().GetResult();
+                serving.GetAwaiter().GetResult();
+                Check(answer.HasToolCalls && answer.ToolCalls.Count==1,"Native provider tool call was not materialized");
+                Check(answer.ToolCalls[0].Name=="write_to_cell" && answer.ToolCalls[0].ArgumentsJson.Contains("\"value\":42"),"Native tool call decoded incorrectly");
+            }
+        }
     }
     static void AsyncContextRegression() {
         SynchronizationContext.SetSynchronizationContext(null);
@@ -277,6 +365,14 @@ class WorkspaceStartupRegression {
         anthropic.SetModel("fixture-model");
         string payload=anthropic.BuildPayload(new ChatRequest{SystemPrompt="Office context",UserTurn=new ChatTurn{Role=ChatRole.User,Text="Hello"}},false);
         Check(payload.Contains("\"max_tokens\":4096") && payload.Contains("\"system\":\"Office context\"") && !payload.Contains("\"role\":\"system\""),"Anthropic payload format invalid");
+        string nativeAnthropic=anthropic.BuildPayload(new ChatRequest{UseNativeTools=true,SystemPrompt="Office context",UserTurn=new ChatTurn{Role=ChatRole.User,Text="Create"}},false);
+        Check(nativeAnthropic.Contains("\"tools\"") && nativeAnthropic.Contains("omnix_tool") && nativeAnthropic.Contains("write_to_cell"),"Anthropic native tool schema missing");
+        var gemini=new GeminiAdapter();
+        string geminiPayload=gemini.BuildPayload(new ChatRequest{UseNativeTools=true,UserTurn=new ChatTurn{Role=ChatRole.User,Text="Create"}},false);
+        Check(geminiPayload.Contains("functionDeclarations") && geminiPayload.Contains("omnix_tool") && geminiPayload.Contains("args_json"),"Gemini function declaration missing");
+        var ollama=new OllamaAdapter();
+        string ollamaPayload=ollama.BuildPayload(new ChatRequest{UseNativeTools=true,UserTurn=new ChatTurn{Role=ChatRole.User,Text="Create"}});
+        Check(ollamaPayload.Contains("\"tools\"") && ollamaPayload.Contains("omnix_tool"),"Ollama native tool schema missing");
     }
     [STAThread] static int Main() {
         try {
@@ -318,6 +414,7 @@ class WorkspaceStartupRegression {
             AsyncContextRegression();
             CapabilityRegression();
             AccessRecoveryRegression();
+            NativeGatewayRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");

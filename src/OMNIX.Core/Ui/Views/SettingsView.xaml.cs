@@ -465,7 +465,7 @@ namespace OMNIX.Core.Ui
 
             var operation = BeginProviderOperation(35);
             TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
-            TestResultText.Text = "Testing model '" + model + "' with a tiny document-free text request…";
+            TestResultText.Text = "Testing model '" + model + "' with a tiny document-free OMNIX tool-calling probe…";
             try
             {
                 var credentials = gateway.Router.BuildCredentials(info.Id);
@@ -479,7 +479,8 @@ namespace OMNIX.Core.Ui
                 ModelVerificationScroll.Visibility = Visibility.Visible;
                 TestResultText.Text = model + ": " + result.Summary;
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty,
-                    result.Working ? "B.Success" : "B.Danger");
+                    result.Working ? "B.Success" :
+                    result.State == ModelVerificationState.TextOnly ? "B.ForegroundDim" : "B.Danger");
             }
             catch (OperationCanceledException)
             {
@@ -548,10 +549,11 @@ namespace OMNIX.Core.Ui
                 WorkingModelsOnlyCheck.Visibility = Visibility.Visible;
 
                 int working = results.Count(x => x.Working);
-                TestResultText.Text = "Verification complete: " + working + " working of " + results.Count +
-                                      " tested model" + (results.Count == 1 ? "" : "s") + ".";
+                int textOnly = results.Count(x => x.State == ModelVerificationState.TextOnly);
+                TestResultText.Text = "Verification complete: " + working + " OMNIX tool-compatible, " +
+                                      textOnly + " text-only, " + results.Count + " tested.";
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty,
-                    working > 0 ? "B.Success" : "B.Danger");
+                    working > 0 ? "B.Success" : textOnly > 0 ? "B.ForegroundDim" : "B.Danger");
                 RefreshModelOptions(EffectiveModelId);
             }
             catch (OperationCanceledException)
@@ -606,6 +608,7 @@ namespace OMNIX.Core.Ui
                 .ToList();
 
             int working = ordered.Count(x => x.Working);
+            int textOnly = ordered.Count(x => x.State == ModelVerificationState.TextOnly);
             int denied = ordered.Count(x => x.State == ModelVerificationState.AccessDenied);
             int unavailable = ordered.Count(x => x.State == ModelVerificationState.NotFoundOrUnavailable);
             int limited = ordered.Count(x => x.State == ModelVerificationState.RateLimited);
@@ -614,15 +617,16 @@ namespace OMNIX.Core.Ui
 
             var lines = new List<string>
             {
-                "Progress " + completed + "/" + total + " · working=" + working +
-                " · denied=" + denied + " · unavailable=" + unavailable +
+                "Progress " + completed + "/" + total + " · tool-compatible=" + working +
+                " · text-only=" + textOnly + " · denied=" + denied + " · unavailable=" + unavailable +
                 " · rate-limited=" + limited + " · incompatible=" + incompatible +
                 " · timeout=" + timedOut
             };
             foreach (var result in ordered.Take(20))
             {
-                string mark = result.Working ? "✓" : "×";
+                string mark = result.Working ? "✓" : result.State == ModelVerificationState.TextOnly ? "~" : "×";
                 lines.Add(mark + " " + result.ModelId + " — " + result.State +
+                          (result.ToolCallingVerified ? " · tools=" + (result.ToolTransport ?? "verified") : "") +
                           (result.LatencyMs > 0 ? " · " + result.LatencyMs + " ms" : ""));
             }
             if (ordered.Count > 20) lines.Add("… " + (ordered.Count - 20) + " more tested models");

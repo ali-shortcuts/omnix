@@ -57,9 +57,10 @@ OMNIX does not treat a model catalog as proof of usable inference.
 
 - **Test connection** checks endpoint/authentication/catalog without using a model.
 - **Detect models** lists the live advertised catalog.
-- **Test model** verifies the selected model with a tiny synthetic text request.
+- **Test model** verifies the selected model with a tiny document-free OMNIX tool-calling probe.
 - **Verify models** can test up to 100 detected IDs sequentially with bounded per-model timeouts and
-  exposes which IDs actually work for the current provider/API configuration.
+  distinguishes OMNIX-tool-compatible models from **TextOnly** models that can answer chat but did
+  not demonstrate a valid OMNIX tool call for Office execution.
 
 A provider can therefore be connected while a specific model is unavailable, denied, rate-limited,
 or incompatible. Those states are intentionally reported separately.
