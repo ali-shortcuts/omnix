@@ -260,7 +260,7 @@ namespace OMNIX.Core.Tools
         private static string SheetInspect(Excel.Workbook wb,ToolArguments a)
         {
             var ws=Sheet(wb,a.Get("sheet",""));
-            int charts=0,pivots=0; try{charts=((Excel.ChartObjects)ws.ChartObjects()).Count;}catch{} try{pivots=ws.PivotTables().Count;}catch{}
+            int charts=0,pivots=0; try{charts=((Excel.ChartObjects)ws.ChartObjects()).Count;}catch{} try{pivots=((Excel.PivotTables)ws.PivotTables()).Count;}catch{}
             var sb=new StringBuilder();
             sb.AppendLine("Sheet="+ws.Name+"; visible="+ws.Visible+"; used="+ws.UsedRange.Address[false,false]+
                 "; rows="+ws.UsedRange.Rows.Count+"; columns="+ws.UsedRange.Columns.Count+"; tables="+ws.ListObjects.Count+
