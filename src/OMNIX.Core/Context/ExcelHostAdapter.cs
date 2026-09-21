@@ -61,10 +61,10 @@ namespace OMNIX.Core.Context
                     string sheetName = nested != null && nested["sheet"] != null ? nested["sheet"].ToString() : "";
                     string address = nested != null && nested["address"] != null ? nested["address"].ToString() : "";
                     ActivateCapabilityRibbonTab(capability);
-                    var wb = _app.ActiveWorkbook;
-                    if (wb != null && !string.IsNullOrWhiteSpace(sheetName))
+                    var capabilityWorkbook = _app.ActiveWorkbook;
+                    if (capabilityWorkbook != null && !string.IsNullOrWhiteSpace(sheetName))
                     {
-                        var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                        var ws = capabilityWorkbook.Worksheets[sheetName] as Excel.Worksheet;
                         if (ws != null)
                         {
                             ws.Activate();
