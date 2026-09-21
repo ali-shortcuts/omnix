@@ -65,7 +65,7 @@ namespace OMNIX.Core.Tools
             try
             {
                 EnsureRequestScope(ct);
-                string label = FriendlyToolLabel(call.Name, adapter);
+                string label = FriendlyToolLabel(call.Name, adapter, call.ArgumentsJson);
                 ReportProgress("Starting · " + label);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
@@ -208,7 +208,7 @@ namespace OMNIX.Core.Tools
 
             // The active Office document may have changed while PrepareWrite inspected it.
             EnsureRequestScope(ct);
-            string label = FriendlyToolLabel(call.Name, adapter);
+            string label = FriendlyToolLabel(call.Name, adapter, call.ArgumentsJson);
             ReportProgress("Preview ready · " + label);
 
             if (WriteConfirmation == null)
@@ -251,28 +251,43 @@ namespace OMNIX.Core.Tools
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
 
-        private static string FriendlyToolLabel(string toolName, IHostAdapter adapter)
+        private static string FriendlyToolLabel(string toolName, IHostAdapter adapter, string argumentsJson)
         {
             string host = adapter != null ? adapter.HostDisplayName : "Office";
+            var args = ToolArguments.Parse(argumentsJson);
+            string sheet = args.Get("sheet", "");
+            string address = args.Get("address", args.Get("range", ""));
+            string target = "";
+            if (!string.IsNullOrWhiteSpace(sheet) && !string.IsNullOrWhiteSpace(address))
+                target = " · " + sheet + "!" + address;
+            else if (!string.IsNullOrWhiteSpace(sheet))
+                target = " · " + sheet;
+            else if (!string.IsNullOrWhiteSpace(address))
+                target = " · " + address;
+
             switch (toolName)
             {
                 case ToolNames.SearchConversation: return "Searching conversation memory";
                 case ToolNames.SearchOfficeReference: return "Searching Office reference";
                 case ToolNames.ReadDocumentMap: return "Inspecting " + host + " structure";
-                case ToolNames.ReadDocumentSection: return "Reading a bounded " + host + " section";
+                case ToolNames.ReadDocumentSection:
+                    if (host == "Excel") return "Reading Excel section" + target;
+                    if (host == "Word") return "Reading Word story · " + args.Get("story", "main");
+                    if (host == "PowerPoint") return "Reading PowerPoint slide · " + args.Get("slide", "1");
+                    return "Reading a bounded " + host + " section";
                 case ToolNames.ReadSelection: return "Reading current " + host + " selection";
                 case ToolNames.ReadDocument:
                 case ToolNames.ReadPresentation: return "Reading " + host + " document content";
                 case ToolNames.CaptureChartAsImage: return "Inspecting Excel chart";
-                case ToolNames.CaptureSlideAsImage: return "Inspecting PowerPoint slide";
+                case ToolNames.CaptureSlideAsImage: return "Inspecting PowerPoint slide · " + args.Get("slide", "current");
                 case ToolNames.CaptureCurrentViewAsImage: return "Inspecting current " + host + " view";
-                case ToolNames.CreateDataTable: return "Creating Excel worksheet and table";
-                case ToolNames.WriteToCell: return "Writing Excel cell";
-                case ToolNames.InsertFormula: return "Writing Excel formula";
-                case ToolNames.HighlightRange: return "Formatting Excel range";
+                case ToolNames.CreateDataTable: return "Creating Excel worksheet and table" + target;
+                case ToolNames.WriteToCell: return "Writing Excel cell" + target;
+                case ToolNames.InsertFormula: return "Writing Excel formula" + target;
+                case ToolNames.HighlightRange: return "Formatting Excel range" + target;
                 case ToolNames.RewriteSelectedText: return "Rewriting selected Word text";
-                case ToolNames.InsertSlide: return "Creating PowerPoint slide";
-                case ToolNames.AddSpeakerNotes: return "Writing PowerPoint speaker notes";
+                case ToolNames.InsertSlide: return "Creating PowerPoint slide · position " + args.Get("index", "end");
+                case ToolNames.AddSpeakerNotes: return "Writing PowerPoint speaker notes · slide " + args.Get("slide", "current");
                 default: return "Running approved " + host + " operation";
             }
         }
