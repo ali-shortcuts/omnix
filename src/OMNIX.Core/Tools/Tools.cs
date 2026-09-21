@@ -51,6 +51,37 @@ namespace OMNIX.Core.Tools
 
         public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
         public static bool IsWriteTool(string name) { return !string.IsNullOrEmpty(name) && WriteTools.Contains(name); }
+
+        public static IReadOnlyList<string> AllWhitelisted
+        {
+            get { return Whitelist.OrderBy(x => x, StringComparer.Ordinal).ToList(); }
+        }
+
+        /// <summary>
+        /// Conservative provider/tool-name normalization. It accepts common namespace wrappers and
+        /// hyphenated names only when the final canonical name is already in the hard whitelist.
+        /// This never expands the executable surface.
+        /// </summary>
+        public static string Normalize(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            string value = name.Trim();
+            if (Whitelist.Contains(value)) return value;
+
+            foreach (char separator in new[] { '.', '/', ':' })
+            {
+                int ix = value.LastIndexOf(separator);
+                if (ix >= 0 && ix + 1 < value.Length)
+                {
+                    string tail = value.Substring(ix + 1).Trim();
+                    if (Whitelist.Contains(tail)) return tail;
+                }
+            }
+
+            string underscored = value.Replace('-', '_');
+            if (Whitelist.Contains(underscored)) return underscored;
+            return value;
+        }
     }
 
     public sealed class ToolCall
