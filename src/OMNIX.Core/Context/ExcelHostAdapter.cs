@@ -44,7 +44,7 @@ namespace OMNIX.Core.Context
         {
             get
             {
-                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, cell values, formulas and range highlighting. Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
+                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, typed cell values, formulas, range highlighting, and bounded professional range formatting (font, alignment, number format, wrap, fill, border and AutoFit). Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
             }
         }
 
