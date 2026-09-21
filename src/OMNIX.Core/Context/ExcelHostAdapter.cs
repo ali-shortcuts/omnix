@@ -19,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IAdvancedOfficeCapabilityHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -44,7 +44,7 @@ namespace OMNIX.Core.Context
         {
             get
             {
-                return "Excel direct object-model access: workbook/worksheet navigation, bounded cell values/formulas/number formats, named ranges, tables, charts/shapes metadata, chart/current-view capture, new styled data tables, typed cell values, formulas, range highlighting, and bounded professional range formatting (font, alignment, number format, wrap, fill, border and AutoFit). Native Ribbon tabs are activated only to reveal the real area related to an actual OMNIX operation; OMNIX never pretends a Ribbon button was clicked when the Object Model performed the change.";
+                return "Excel broad Object Model capability layer: workbook/worksheet navigation; bounded values, formulas and formats; rows/columns; tables; names; sort/filter; validation; conditional formatting; charts; PivotTable refresh/inspection; comments/notes; hyperlinks; freeze panes/zoom; page setup; typed values; formulas; professional formatting; chart/current-view capture. Use list_office_capabilities for the exact current registry. Security/Trust Center, VBA/macro execution, arbitrary files/processes and unknown COM reflection are not exposed.";
             }
         }
 
@@ -82,6 +82,31 @@ namespace OMNIX.Core.Context
                     string address = args.Get("address", args.Get("range", ""));
                     if (ws != null && !string.IsNullOrWhiteSpace(address))
                         ShowRange(ws.Range[address]);
+                    return;
+                }
+
+                if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
+                {
+                    string sheetName = args.Get("sheet", "");
+                    string address = args.Get("address", args.Get("destination", ""));
+                    var ws = string.IsNullOrWhiteSpace(sheetName)
+                        ? _app.ActiveSheet as Excel.Worksheet
+                        : wb.Worksheets[sheetName] as Excel.Worksheet;
+                    if (ws != null) ws.Activate();
+                    if (ws != null && !string.IsNullOrWhiteSpace(address))
+                    {
+                        try { ShowRange(ws.Range[address]); } catch { }
+                    }
+                    string chartName = args.Get("chart", "");
+                    if (ws != null && !string.IsNullOrWhiteSpace(chartName))
+                    {
+                        try
+                        {
+                            foreach (Excel.ChartObject chart in (Excel.ChartObjects)ws.ChartObjects())
+                                if (string.Equals(chart.Name, chartName, StringComparison.OrdinalIgnoreCase)) { chart.Activate(); break; }
+                        }
+                        catch { }
+                    }
                     return;
                 }
 
@@ -135,8 +160,11 @@ namespace OMNIX.Core.Context
                 case ToolNames.ReadDocumentMap:
                 case ToolNames.ReadDocumentSection: tab = "TabData"; break;
                 case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
+                case ToolNames.ApplyOfficeCapability:
+                case ToolNames.InspectOfficeCapability:
                 case ToolNames.WriteToCell:
                 case ToolNames.HighlightRange:
+                case ToolNames.FormatRange:
                 case ToolNames.ReadSelection:
                 case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
             }
@@ -432,6 +460,8 @@ namespace OMNIX.Core.Context
                 case ToolNames.HighlightRange:
                 case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
+                case ToolNames.ApplyOfficeCapability:
+                    return PrepareCapabilityWrite(argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
                         "Tool '" + toolName + "' is not supported by Excel.",
@@ -442,7 +472,23 @@ namespace OMNIX.Core.Context
         public void ApplyWrite(string toolName, string argumentsJson)
         {
             if (toolName == ToolNames.CreateDataTable) ExcelTableBuilder.Apply(_app, argumentsJson);
+            else if (toolName == ToolNames.ApplyOfficeCapability) ApplyCapabilityWrite(argumentsJson);
             else ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
+        }
+
+        public string InspectCapability(ToolArguments arguments)
+        {
+            return ExcelAdvancedCapabilities.Inspect(this, arguments);
+        }
+
+        public WritePreview PrepareCapabilityWrite(string argumentsJson)
+        {
+            return ExcelAdvancedCapabilities.Prepare(this, argumentsJson);
+        }
+
+        public void ApplyCapabilityWrite(string argumentsJson)
+        {
+            ExcelAdvancedCapabilities.Apply(this, argumentsJson);
         }
 
         internal Excel.Application App { get { return _app; } }
