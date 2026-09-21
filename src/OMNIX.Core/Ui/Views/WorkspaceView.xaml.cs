@@ -55,7 +55,23 @@ namespace OMNIX.Core.Ui
         {
             if (!_ready || ReferenceText == null) return;
             var host = ReferenceHost.SelectedItem as ComboBoxItem;
-            ReferenceText.Text = Reference.OfficeReference.Search(host != null ? host.Content.ToString() : "Excel", ReferenceQuery.Text, _referenceOffset);
+            var languageItem = ReferenceLanguage.SelectedItem as ComboBoxItem;
+            string language = languageItem != null && languageItem.Tag != null
+                ? languageItem.Tag.ToString()
+                : "en";
+            bool persian = string.Equals(language, "fa", StringComparison.OrdinalIgnoreCase);
+
+            ReferenceText.FlowDirection = persian ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+            ReferenceQuery.FlowDirection = persian ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+            ReferenceQuery.ToolTip = persian ? "جستجوی نام تابع یا موضوع" : "Search function name or topic";
+            ReferencePreviousButton.Content = persian ? "قبلی" : "Previous";
+            ReferenceNextButton.Content = persian ? "بعدی" : "Next";
+
+            ReferenceText.Text = Reference.OfficeReference.Search(
+                host != null ? host.Content.ToString() : "Excel",
+                ReferenceQuery.Text,
+                _referenceOffset,
+                language);
         }
 
         private void ShowChat(object sender, RoutedEventArgs e) { if (!_ready) return; LearnPage.Visibility = Visibility.Collapsed; ChatPage.Visibility = Visibility.Visible; SettingsPage.Visibility = Visibility.Collapsed; AboutPage.Visibility = Visibility.Collapsed; }
