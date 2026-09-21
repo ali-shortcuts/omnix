@@ -23,8 +23,6 @@ namespace OMNIX.Core.Tools
         /// <summary>UI wires this: returns true when the user confirmed the change.</summary>
         public Func<string, string> ConversationSearch { get; set; }
 
-        public Action<string> Progress { get; set; }
-
         public Func<WritePreview, Task<bool>> WriteConfirmation { get; set; }
 
         /// <summary>
@@ -65,12 +63,9 @@ namespace OMNIX.Core.Tools
             try
             {
                 EnsureRequestScope(ct);
-                string label = FriendlyToolLabel(call.Name, adapter, call.ArgumentsJson);
-                ReportProgress("Starting · " + label);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
                     : ExecuteRead(call, adapter, ct);
-                ReportProgress((result.Success ? "Completed · " : "Failed · ") + label);
                 return result;
             }
             catch (OperationCanceledException)
@@ -90,12 +85,6 @@ namespace OMNIX.Core.Tools
             }
         }
 
-        private void ReportProgress(string message)
-        {
-            try { if (Progress != null) Progress(message); }
-            catch { /* Display failures must not interrupt Office operations. */ }
-        }
-
         private void EnsureRequestScope(CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
@@ -113,6 +102,7 @@ namespace OMNIX.Core.Tools
         private ToolResult ExecuteRead(ToolCall call, IHostAdapter adapter, CancellationToken ct)
         {
             EnsureRequestScope(ct);
+            Reveal(adapter, call, OfficeExecutionStage.Inspect);
 
             switch (call.Name)
             {
@@ -208,13 +198,11 @@ namespace OMNIX.Core.Tools
 
             // The active Office document may have changed while PrepareWrite inspected it.
             EnsureRequestScope(ct);
-            string label = FriendlyToolLabel(call.Name, adapter, call.ArgumentsJson);
-            ReportProgress("Preview ready · " + label);
+            Reveal(adapter, call, OfficeExecutionStage.Preview);
 
             if (WriteConfirmation == null)
                 return ToolResult.Fail("Write confirmation dialog is unavailable; change was NOT applied.");
 
-            ReportProgress("Waiting for approval · " + label);
             bool confirmed;
             try
             {
@@ -240,57 +228,35 @@ namespace OMNIX.Core.Tools
             }
 
             EnsureRequestScope(ct);
-            ReportProgress("Applying · " + label);
             string applyArguments = !string.IsNullOrWhiteSpace(preview.ArgumentsJson)
                 ? preview.ArgumentsJson
                 : call.ArgumentsJson;
+            Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Apply);
             adapter.ApplyWrite(call.Name, applyArguments);
+            Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Verify);
             string hint = call.Name == ToolNames.CreateDataTable
                 ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
                 : Localization.Strings.T("S.Tools.Applied");
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
 
-        private static string FriendlyToolLabel(string toolName, IHostAdapter adapter, string argumentsJson)
-        {
-            string host = adapter != null ? adapter.HostDisplayName : "Office";
-            var args = ToolArguments.Parse(argumentsJson);
-            string sheet = args.Get("sheet", "");
-            string address = args.Get("address", args.Get("range", ""));
-            string target = "";
-            if (!string.IsNullOrWhiteSpace(sheet) && !string.IsNullOrWhiteSpace(address))
-                target = " · " + sheet + "!" + address;
-            else if (!string.IsNullOrWhiteSpace(sheet))
-                target = " · " + sheet;
-            else if (!string.IsNullOrWhiteSpace(address))
-                target = " · " + address;
 
-            switch (toolName)
+        private static void Reveal(IHostAdapter adapter, ToolCall call, OfficeExecutionStage stage)
+        {
+            var visible = adapter as IVisibleOfficeExecutionHost;
+            if (visible == null || call == null) return;
+            try
             {
-                case ToolNames.SearchConversation: return "Searching conversation memory";
-                case ToolNames.SearchOfficeReference: return "Searching Office reference";
-                case ToolNames.ReadDocumentMap: return "Inspecting " + host + " structure";
-                case ToolNames.ReadDocumentSection:
-                    if (host == "Excel") return "Reading Excel section" + target;
-                    if (host == "Word") return "Reading Word story · " + args.Get("story", "main");
-                    if (host == "PowerPoint") return "Reading PowerPoint slide · " + args.Get("slide", "1");
-                    return "Reading a bounded " + host + " section";
-                case ToolNames.ReadSelection: return "Reading current " + host + " selection";
-                case ToolNames.ReadDocument:
-                case ToolNames.ReadPresentation: return "Reading " + host + " document content";
-                case ToolNames.CaptureChartAsImage: return "Inspecting Excel chart";
-                case ToolNames.CaptureSlideAsImage: return "Inspecting PowerPoint slide · " + args.Get("slide", "current");
-                case ToolNames.CaptureCurrentViewAsImage: return "Inspecting current " + host + " view";
-                case ToolNames.CreateDataTable: return "Creating Excel worksheet and table" + target;
-                case ToolNames.WriteToCell: return "Writing Excel cell" + target;
-                case ToolNames.InsertFormula: return "Writing Excel formula" + target;
-                case ToolNames.HighlightRange: return "Formatting Excel range" + target;
-                case ToolNames.RewriteSelectedText: return "Rewriting selected Word text";
-                case ToolNames.InsertSlide: return "Creating PowerPoint slide · position " + args.Get("index", "end");
-                case ToolNames.AddSpeakerNotes: return "Writing PowerPoint speaker notes · slide " + args.Get("slide", "current");
-                default: return "Running approved " + host + " operation";
+                visible.RevealOperation(call.Name, ToolArguments.Parse(call.ArgumentsJson), stage);
+            }
+            catch (Exception ex)
+            {
+                // Moving the Office viewport is UX only. It must never turn a valid document
+                // operation into a failure, and it must never be reported as a fake execution.
+                Logger.Error("ui", "Visible Office execution could not reveal target for " + call.Name, ex);
             }
         }
+
 
     }
 }
