@@ -110,3 +110,10 @@ OMNIX no longer relies only on models reproducing a textual `omnix_tool` block c
   OMNIX reports a runtime failure instead of fabricating a table, VBA macro or success claim.
 - Gateway diagnostics record response kind, sanitized tool name, whitelist/write classification and
   success/failure counts. Tool arguments, API keys and Office document content are not logged.
+- A successful write is no longer sufficient for a success answer. The latest Office mutation is marked
+  unverified until a subsequent real Office read tool reads back document state. If a provider tries to
+  finish before read-back, the Gateway issues bounded verification-repair turns; repeated failure returns
+  an explicit incomplete/runtime result instead of claiming that the workbook/document/presentation is done.
+- Legacy textual fallback tool names may include common provider namespaces (for example
+  `omnix.write_to_cell`); normalization is accepted only when it resolves to an existing hard-whitelisted
+  canonical tool. This improves compatibility without expanding the executable surface.

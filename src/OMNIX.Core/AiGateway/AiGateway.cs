@@ -91,6 +91,8 @@ namespace OMNIX.Core.AiGateway
             bool accessClarified = false;
             bool writeAttempted = false;
             bool writeSucceeded = false;
+            bool lastWriteVerified = true;
+            int verificationRepairTurns = 0;
             int successfulWrites = 0;
             int failedWrites = 0;
             string lastWriteFailure = null;
@@ -349,6 +351,34 @@ namespace OMNIX.Core.AiGateway
                             (string.IsNullOrWhiteSpace(lastWriteFailure) ? "No verified change was applied." : "Last write result: " + lastWriteFailure));
                     }
 
+                    if (mutationRequested && writeSucceeded && !lastWriteVerified)
+                    {
+                        Logger.Gateway("Verification enforcement: final text before read-back; repairTurn=" + verificationRepairTurns);
+                        if (verificationRepairTurns++ < MaxMutationRepairTurns)
+                        {
+                            history.Add(current);
+                            history.Add(new ChatTurn
+                            {
+                                Role = ChatRole.Assistant,
+                                Text = SafeAssistantTrace(response, "Provider returned final text before read-back verification."),
+                                TimestampUtc = DateTime.UtcNow
+                            });
+                            current = new ChatTurn
+                            {
+                                Role = ChatRole.User,
+                                TimestampUtc = DateTime.UtcNow,
+                                Text = "OMNIX RUNTIME VERIFICATION REQUIRED: the latest Office write succeeded, but the affected Office state has not been read back after that write. " +
+                                       "Use exactly one appropriate read tool now (for example read_document_section/read_selection/read_document_map/read_document/read_presentation) to verify the actual result. " +
+                                       "Do not claim completion until the read result confirms the latest change."
+                            };
+                            continue;
+                        }
+
+                        return MutationRuntimeFailure(
+                            "OMNIX applied at least one Office write, but the latest change could not be verified by a subsequent Office read. " +
+                            "Treat the task as incomplete and inspect the active document before relying on it.");
+                    }
+
                     Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted +
                                    "; successfulWrites=" + successfulWrites + "; failedWrites=" + failedWrites +
                                    "; accessClarified=" + accessClarified);
@@ -397,12 +427,18 @@ namespace OMNIX.Core.AiGateway
                         writeSucceeded = true;
                         successfulWrites++;
                         lastWriteFailure = null;
+                        lastWriteVerified = false;
                     }
                     else
                     {
                         failedWrites++;
                         lastWriteFailure = SafeRuntimeSummary(result != null ? result.ContentForModel : "No tool result.", 900);
                     }
+                }
+                else if (result != null && result.Success && writeSucceeded && IsVerificationTool(call.Name))
+                {
+                    lastWriteVerified = true;
+                    Logger.Gateway("Read-back verification completed after latest write; tool=" + SafeToolName(call.Name));
                 }
 
                 Logger.Gateway("Tool completed: tool=" + SafeToolName(call.Name) +
@@ -446,6 +482,16 @@ namespace OMNIX.Core.AiGateway
                 final = new ChatResponse { Text = string.Empty };
             // Never return the last internal tool call as if it were a completed user answer.
             return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
+        }
+
+        private static bool IsVerificationTool(string name)
+        {
+            string tool = ToolNames.Normalize(name);
+            return tool == ToolNames.ReadDocumentSection ||
+                   tool == ToolNames.ReadDocumentMap ||
+                   tool == ToolNames.ReadSelection ||
+                   tool == ToolNames.ReadDocument ||
+                   tool == ToolNames.ReadPresentation;
         }
 
         private static bool TryValidateToolArguments(string json, out string error)

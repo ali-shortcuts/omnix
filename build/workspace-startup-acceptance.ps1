@@ -125,8 +125,9 @@ class WorkspaceStartupRegression {
         public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
             Calls++;
             string write="```omnix_tool\n{\"tool\":\"create_data_table\",\"args\":{\"sheet\":\"Test\",\"headers\":[\"ID\"],\"rows\":[[1]]}}\n```";
+            string verify="```omnix_tool\n{\"tool\":\"read_document_section\",\"args\":{\"sheet\":\"Test\",\"row\":1,\"column\":1,\"rows\":2,\"columns\":1}}\n```";
             string answer = CancelScenario ? (Calls==1 ? write : "Write access is unavailable")
-                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : "Verified completed";
+                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : Calls==3 ? verify : "Verified completed";
             if(delta!=null) delta(answer);
             return Task.FromResult(new ChatResponse { Text=answer });
         }
@@ -148,7 +149,33 @@ class WorkspaceStartupRegression {
                         ArgumentsJson="{\"sheet\":\"NativeTest\",\"headers\":[\"ID\"],\"rows\":[[1]]}" }
                 }
             });
+            if(Calls==2) return Task.FromResult(new ChatResponse {
+                Text="",
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-2", Name="read_document_section",
+                        ArgumentsJson="{\"sheet\":\"NativeTest\",\"row\":1,\"column\":1,\"rows\":2,\"columns\":1}" }
+                }
+            });
             return Task.FromResult(new ChatResponse { Text="Verified completed" });
+        }
+    }
+
+    sealed class NoReadbackProvider : IProviderAdapter {
+        public int Calls;
+        public ProviderInfo Info { get; private set; }
+        public NoReadbackProvider() { Info=new ProviderInfo{Id="custom",DisplayName="No Readback Fixture",Kind=ProviderKind.Cloud,Vision=VisionSupport.No}; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            if(Calls==1) return Task.FromResult(new ChatResponse {
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-1", Name="write_to_cell", ArgumentsJson="{\"address\":\"A1\",\"value\":\"done\"}" }
+                }
+            });
+            return Task.FromResult(new ChatResponse { Text="Everything is complete." });
         }
     }
 
@@ -166,9 +193,28 @@ class WorkspaceStartupRegression {
             var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
             var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },
                 host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
-            Check(provider.Calls==2,"Native tool response did not continue to final provider turn");
+            Check(provider.Calls==3,"Native tool response did not require read-back before final provider turn");
             Check(confirmations==1 && host.Writes==1,"Native tool call with empty text was not executed through confirmation");
-            Check(result.Text=="Verified completed","Native tool loop did not return final answer");
+            Check(host.Reads>=2,"Latest write was not read back after execution");
+            Check(result.Text=="Verified completed","Native tool loop did not return final answer after read-back");
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
+    }
+
+    static void VerificationEnforcementRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            var registry=new ProviderRegistry(); var provider=new NoReadbackProvider();
+            var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+            providers.Clear(); providers.Add(provider);
+            var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+            var host=new FakeHost { AllowWrites=true }; int confirmations=0;
+            var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
+            var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Write done into A1 in this Excel file" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+            Check(confirmations==1 && host.Writes==1,"Verification enforcement repeated or skipped the approved write");
+            Check(provider.Calls==4,"Verification enforcement did not perform bounded repair attempts");
+            Check(result.Text.Contains("could not be verified") || result.Text.Contains("runtime stopped safely"),"Unverified write was incorrectly reported as completed");
         } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
 
@@ -186,8 +232,11 @@ class WorkspaceStartupRegression {
                 var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(!cancel); } };
                 var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
                 Check(confirmations==1 && host.Writes==(cancel ? 0 : 1),"Recovery bypassed confirmation or failed to execute approved write");
-                Check(provider.Calls==(cancel ? 2 : 3),"Recovery retried cancelled write or exceeded bounded repair");
-                if(!cancel) Check(result.Text=="Verified completed","Gateway did not return corrected final answer");
+                Check(provider.Calls==(cancel ? 2 : 4),"Recovery retried cancelled write or skipped required read-back");
+                if(!cancel) {
+                    Check(host.Reads>=2,"Recovery path did not read back the successful write");
+                    Check(result.Text=="Verified completed","Gateway did not return corrected final answer after verification");
+                }
             }
         } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
@@ -393,6 +442,8 @@ class WorkspaceStartupRegression {
             Check(nativeCall != null && nativeCall.Name == "write_to_cell" && nativeCall.ArgumentsJson.Contains("کد محصول"), "Provider-native tool call not parsed");
             var nativeTable = OMNIX.Core.Tools.ToolCallParser.Parse("<|tool_call_start|>[create_data_table(sheet='محصولات', uniqueName=True, headers=['کد','وزن'], rows=[['T001',3]])]<|tool_call_end|>");
             Check(nativeTable != null && nativeTable.Name == "create_data_table" && nativeTable.ArgumentsJson.Contains("\"uniqueName\":true"), "Nested native table arguments not parsed");
+            var namespacedFallback = OMNIX.Core.Tools.ToolCallParser.Parse("[omnix.write_to_cell(sheet='Sheet1', address='A1', value='x')]");
+            Check(namespacedFallback != null && namespacedFallback.Name == "write_to_cell", "Namespaced text-fallback tool name was not normalized before whitelist");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>broken").Name == "", "Incomplete call must fail closed");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("plain answer") == null, "Plain answer treated as a tool");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>{\"tool\":\"read_selection\"}</tool_call><tool_call>{}</tool_call>").Name == "", "Ambiguous calls accepted");
@@ -415,6 +466,7 @@ class WorkspaceStartupRegression {
             CapabilityRegression();
             AccessRecoveryRegression();
             NativeGatewayRegression();
+            VerificationEnforcementRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");

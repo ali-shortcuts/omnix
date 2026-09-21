@@ -187,7 +187,9 @@ namespace OMNIX.Core.Tools
             if (idx < 0)
             {
                 ToolCall direct = ParseFunctionStyle(reply.Trim());
-                return direct != null && ToolNames.IsWhitelisted(direct.Name) ? direct : null;
+                if (direct == null) return null;
+                direct.Name = ToolNames.Normalize(direct.Name);
+                return ToolNames.IsWhitelisted(direct.Name) ? direct : null;
             }
 
             string body;
@@ -240,7 +242,7 @@ namespace OMNIX.Core.Tools
                 string tool = (string)obj["tool"];
                 if (string.IsNullOrWhiteSpace(tool)) return Invalid("Missing tool name");
                 string args = obj["args"] != null ? obj["args"].ToString(Formatting.None) : "{}";
-                return new ToolCall { Name = tool.Trim(), ArgumentsJson = args };
+                return new ToolCall { Name = ToolNames.Normalize(tool), ArgumentsJson = args };
             }
             catch
             {
@@ -264,7 +266,7 @@ namespace OMNIX.Core.Tools
 
             var match = System.Text.RegularExpressions.Regex.Match(
                 body,
-                @"^([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$",
+                @"^([A-Za-z_][A-Za-z0-9_.:/-]*)\s*\((.*)\)\s*$",
                 System.Text.RegularExpressions.RegexOptions.Singleline);
             if (!match.Success) return null;
 
@@ -272,7 +274,7 @@ namespace OMNIX.Core.Tools
             try
             {
                 JObject args = ParseNativeArguments(match.Groups[2].Value);
-                return new ToolCall { Name = name, ArgumentsJson = args.ToString(Formatting.None) };
+                return new ToolCall { Name = ToolNames.Normalize(name), ArgumentsJson = args.ToString(Formatting.None) };
             }
             catch
             {
