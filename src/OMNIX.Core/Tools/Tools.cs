@@ -41,12 +41,12 @@ namespace OMNIX.Core.Tools
         {
             SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage, ListOfficeCapabilities, InspectOfficeCapability,
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ApplyOfficeCapability, ApplyOfficeCapability
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ApplyOfficeCapability
         };
 
         private static readonly HashSet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal)
         {
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ApplyOfficeCapability
         };
 
         public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
