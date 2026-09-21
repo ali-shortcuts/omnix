@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -348,8 +348,13 @@ namespace OMNIX.Core.Context
             return CaptureSlideAsImage(0);
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.PowerPoint, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return PowerPointCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { PowerPointCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) return PrepareCapability(argumentsJson);
             var args = ToolArguments.Parse(argumentsJson);
             switch (toolName)
             {
@@ -398,6 +403,7 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) { ApplyCapability(argumentsJson); return; }
             var args = ToolArguments.Parse(argumentsJson);
             var pres = _app.ActivePresentation;
             if (pres == null)
