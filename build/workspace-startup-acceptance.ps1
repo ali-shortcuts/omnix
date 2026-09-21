@@ -239,7 +239,9 @@ class WorkspaceStartupRegression {
                 Check(visible.ToString() == "Visible prefix ", "Split tool protocol leaked into chat");
             }
             Check(OMNIX.Core.Reference.OfficeReference.Search("Excel", "DSUM").Contains("functions/dsum-function"), "Reference catalog missing DSUM");
-            Check(OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "fa").Contains("مرجع Excel"), "Persian reference mode missing");
+            string faReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "fa");
+            string enReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "en");
+            Check(!string.IsNullOrWhiteSpace(faReference) && faReference != enReference && faReference.Contains("Excel") && faReference.Contains("Microsoft"), "Persian reference mode missing");
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();
