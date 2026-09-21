@@ -68,3 +68,25 @@ Settings now treats provider connectivity and model inference as different facts
 - Custom-provider 404 on `/models` is reported as a reachable endpoint with unavailable catalog,
   rather than being mislabeled as failure of the selected model.
 
+
+
+## Broad capability execution
+
+The visible Office execution engine now also handles registered broad capabilities. Where the target
+is addressable, OMNIX activates the real worksheet/range, Word range/table, or PowerPoint slide/shape
+before the operation and activates a relevant native Ribbon tab when Office exposes one. The Ribbon
+display remains descriptive of the actual operation: Object Model calls are never represented as
+fake button clicks.
+
+Broad mutations still use the existing fail-closed write sequence:
+
+1. validate the exact operation and bounded target,
+2. create a user preview,
+3. require explicit confirmation,
+4. re-check the request/document scope,
+5. apply through the host Object Model,
+6. reveal the real result for verification.
+
+The broad layer is an explicit allowlist rather than reflection, macros or generic `ExecuteMso`
+access. Security-sensitive Office settings and arbitrary system actions remain outside the model's
+tool surface.
