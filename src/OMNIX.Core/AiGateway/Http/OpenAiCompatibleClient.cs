@@ -294,8 +294,38 @@ namespace OMNIX.Core.AiGateway.Http
             Action<string> onDelta, CancellationToken ct)
         {
             _configuredModel = model;
-            string body = BuildPayload(request, onDelta != null);
-            return await SendRawAsync(body, apiKey, onDelta, ct).ConfigureAwait(false);
+            bool stream = onDelta != null;
+            try
+            {
+                string body = BuildPayload(request, stream);
+                return await SendRawAsync(body, apiKey, onDelta, ct).ConfigureAwait(false);
+            }
+            catch (OmnixException ex)
+            {
+                if (request != null && request.UseNativeTools && IsNativeToolSchemaRejection(ex))
+                {
+                    Logger.Gateway("Provider rejected native tool schema; retrying this provider turn with OMNIX text-protocol fallback. provider=" +
+                                   _providerDisplayName + "; category=native_tools_unsupported");
+                    var fallback = new ChatRequest
+                    {
+                        SystemPrompt = request.SystemPrompt,
+                        History = request.History,
+                        UserTurn = request.UserTurn,
+                        UseNativeTools = false
+                    };
+                    string body = BuildPayload(fallback, stream);
+                    return await SendRawAsync(body, apiKey, onDelta, ct).ConfigureAwait(false);
+                }
+                throw;
+            }
+        }
+
+        private static bool IsNativeToolSchemaRejection(OmnixException ex)
+        {
+            if (ex == null || ex.Code != ErrorCode.PROVIDER_ERROR) return false;
+            string details = ex.TechnicalDetails ?? "";
+            return details.IndexOf("HTTP=400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   details.IndexOf("HTTP=422", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         public async Task<ChatResponse> SendRawAsync(string jsonBody, string apiKey,
@@ -327,6 +357,7 @@ namespace OMNIX.Core.AiGateway.Http
                         }
 
                         var sb = new StringBuilder();
+                        var nativeCalls = new List<ProviderToolCall>();
                         string model = _configuredModel;
 
                         if (onDelta == null)
@@ -334,15 +365,27 @@ namespace OMNIX.Core.AiGateway.Http
                             string full = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
                             var root = JObject.Parse(full);
                             model = (string)root.SelectToken("model") ?? model;
-                            string text = _anthropic
-                                ? string.Concat((root["content"] as JArray ?? new JArray()).Where(x => (string)x["type"] == "text").Select(x => (string)x["text"]))
-                                : (string)root.SelectToken("choices[0].message.content") ?? "";
+                            string text;
+                            if (_anthropic)
+                            {
+                                text = string.Concat((root["content"] as JArray ?? new JArray())
+                                    .Where(x => (string)x["type"] == "text")
+                                    .Select(x => (string)x["text"]));
+                                nativeCalls.AddRange(ParseAnthropicNonStreamingToolCalls(root));
+                            }
+                            else
+                            {
+                                text = (string)root.SelectToken("choices[0].message.content") ?? "";
+                                nativeCalls.AddRange(ParseOpenAiNonStreamingToolCalls(root));
+                            }
+
                             if (text.Length > MaxAssistantChars)
                                 throw OmnixException.Provider(_providerDisplayName + " returned an over-sized assistant response.");
                             sb.Append(text);
                         }
                         else
                         {
+                            var accumulators = new Dictionary<int, StreamingToolAccumulator>();
                             using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                             {
                                 foreach (string data in SseLineReader.ReadDataLines(stream, ct))
@@ -351,20 +394,116 @@ namespace OMNIX.Core.AiGateway.Http
                                     JObject chunk;
                                     try { chunk = JObject.Parse(data); }
                                     catch { continue; }
+
                                     model = (string)chunk.SelectToken("model") ?? model;
-                                    if ((string)chunk["type"] == "error") throw OmnixException.Provider("Provider streaming error; response body redacted.");
-                                    string delta = _anthropic ? (string)chunk.SelectToken("delta.text") : (string)chunk.SelectToken("choices[0].delta.content");
-                                    if (!string.IsNullOrEmpty(delta))
+                                    if ((string)chunk["type"] == "error")
+                                        throw OmnixException.Provider("Provider streaming error; response body redacted.");
+
+                                    if (_anthropic)
                                     {
-                                        if (sb.Length + delta.Length > MaxAssistantChars)
-                                            throw OmnixException.Provider(_providerDisplayName + " streamed an over-sized assistant response.");
-                                        sb.Append(delta);
-                                        onDelta(delta);
+                                        string type = (string)chunk["type"] ?? "";
+                                        int index = (int?)chunk["index"] ?? 0;
+                                        if (type == "content_block_start" &&
+                                            string.Equals((string)chunk.SelectToken("content_block.type"), "tool_use", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            StreamingToolAccumulator acc;
+                                            if (!accumulators.TryGetValue(index, out acc))
+                                            {
+                                                acc = new StreamingToolAccumulator();
+                                                accumulators[index] = acc;
+                                            }
+                                            acc.Id = (string)chunk.SelectToken("content_block.id") ?? acc.Id;
+                                            acc.Name = (string)chunk.SelectToken("content_block.name") ?? acc.Name;
+                                            var input = chunk.SelectToken("content_block.input") as JObject;
+                                            if (input != null && input.Count > 0 && acc.Arguments.Length == 0)
+                                                acc.Arguments.Append(input.ToString(Formatting.None));
+                                        }
+                                        else if (type == "content_block_delta" &&
+                                                 string.Equals((string)chunk.SelectToken("delta.type"), "input_json_delta", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            StreamingToolAccumulator acc;
+                                            if (!accumulators.TryGetValue(index, out acc))
+                                            {
+                                                acc = new StreamingToolAccumulator();
+                                                accumulators[index] = acc;
+                                            }
+                                            string partial = (string)chunk.SelectToken("delta.partial_json");
+                                            if (!string.IsNullOrEmpty(partial)) acc.Arguments.Append(partial);
+                                        }
+
+                                        string delta = (string)chunk.SelectToken("delta.text");
+                                        if (!string.IsNullOrEmpty(delta))
+                                        {
+                                            if (sb.Length + delta.Length > MaxAssistantChars)
+                                                throw OmnixException.Provider(_providerDisplayName + " streamed an over-sized assistant response.");
+                                            sb.Append(delta);
+                                            onDelta(delta);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        var toolDeltas = chunk.SelectToken("choices[0].delta.tool_calls") as JArray;
+                                        if (toolDeltas != null)
+                                        {
+                                            foreach (JObject toolDelta in toolDeltas.OfType<JObject>())
+                                            {
+                                                int index = (int?)toolDelta["index"] ?? 0;
+                                                StreamingToolAccumulator acc;
+                                                if (!accumulators.TryGetValue(index, out acc))
+                                                {
+                                                    acc = new StreamingToolAccumulator();
+                                                    accumulators[index] = acc;
+                                                }
+                                                string id = (string)toolDelta["id"];
+                                                string name = (string)toolDelta.SelectToken("function.name");
+                                                string args = (string)toolDelta.SelectToken("function.arguments");
+                                                if (!string.IsNullOrEmpty(id)) acc.Id = id;
+                                                if (!string.IsNullOrEmpty(name)) acc.Name = name;
+                                                if (!string.IsNullOrEmpty(args)) acc.Arguments.Append(args);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            var legacy = chunk.SelectToken("choices[0].delta.function_call") as JObject;
+                                            if (legacy != null)
+                                            {
+                                                StreamingToolAccumulator acc;
+                                                if (!accumulators.TryGetValue(0, out acc))
+                                                {
+                                                    acc = new StreamingToolAccumulator();
+                                                    accumulators[0] = acc;
+                                                }
+                                                string name = (string)legacy["name"];
+                                                string args = (string)legacy["arguments"];
+                                                if (!string.IsNullOrEmpty(name)) acc.Name = name;
+                                                if (!string.IsNullOrEmpty(args)) acc.Arguments.Append(args);
+                                            }
+                                        }
+
+                                        string delta = (string)chunk.SelectToken("choices[0].delta.content");
+                                        if (!string.IsNullOrEmpty(delta))
+                                        {
+                                            if (sb.Length + delta.Length > MaxAssistantChars)
+                                                throw OmnixException.Provider(_providerDisplayName + " streamed an over-sized assistant response.");
+                                            sb.Append(delta);
+                                            onDelta(delta);
+                                        }
                                     }
                                 }
                             }
+                            nativeCalls.AddRange(MaterializeStreamingCalls(accumulators));
                         }
-                        return new ChatResponse { Text = sb.ToString(), Model = model };
+
+                        if (nativeCalls.Count > 0)
+                            Logger.Gateway("Provider response contains native tool call(s): count=" + nativeCalls.Count +
+                                           "; provider=" + _providerDisplayName);
+
+                        return new ChatResponse
+                        {
+                            Text = sb.ToString(),
+                            Model = model,
+                            ToolCalls = nativeCalls.Count > 0 ? nativeCalls : null
+                        };
                     }
                 }
             }
