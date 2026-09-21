@@ -47,6 +47,17 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                string capability = args.Get("capability", "");
+                ActivateCapabilityRibbonTab(capability);
+                try
+                {
+                    if (_app.ActiveWindow != null && _app.Selection != null)
+                        _app.ActiveWindow.ScrollIntoView(_app.Selection.Range, true);
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             try
             {
@@ -88,6 +99,26 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "Word visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("review.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("comment.", StringComparison.OrdinalIgnoreCase)
+                ? "TabReview"
+                : capability.StartsWith("page.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("break.", StringComparison.OrdinalIgnoreCase)
+                    ? "TabPageLayoutWord"
+                    : capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("bookmark.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("field.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("footnote.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("endnote.", StringComparison.OrdinalIgnoreCase)
+                        ? "TabInsert"
+                        : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
