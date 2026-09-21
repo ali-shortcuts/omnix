@@ -186,7 +186,7 @@ namespace OMNIX.Core.Tools
                 if (op.StartsWith("chart.",StringComparison.Ordinal) && op!="chart.create")
                 {
                     var co=ChartObject(wb,args);
-                    return "Chart '" + co.Name + "' on " + co.Parent.Name + ".";
+                    var parent = co.Parent as Excel.Worksheet; return "Chart '" + co.Name + "' on " + (parent != null ? parent.Name : "?") + ".";
                 }
             }
             catch { }
@@ -249,7 +249,7 @@ namespace OMNIX.Core.Tools
             {
                 int charts=0,pivots=0;
                 try{charts=((Excel.ChartObjects)ws.ChartObjects()).Count;}catch{}
-                try{pivots=ws.PivotTables().Count;}catch{}
+                try{pivots=((Excel.PivotTables)ws.PivotTables()).Count;}catch{}
                 sb.AppendLine("sheet="+ws.Name+"; visible="+ws.Visible+"; used="+ws.UsedRange.Address[false,false]+
                               "; tables="+ws.ListObjects.Count+"; charts="+charts+"; pivots="+pivots+"; shapes="+ws.Shapes.Count);
                 if(sb.Length>MaxText) break;
@@ -312,7 +312,8 @@ namespace OMNIX.Core.Tools
         private static string ChartInspect(Excel.Workbook wb,ToolArguments a)
         {
             var co=ChartObject(wb,a); var ch=co.Chart; var sb=new StringBuilder();
-            sb.AppendLine("Chart="+co.Name+"; sheet="+co.Parent.Name+"; type="+ch.ChartType+"; hasTitle="+ch.HasTitle+
+            var parent = co.Parent as Excel.Worksheet;
+            sb.AppendLine("Chart="+co.Name+"; sheet="+(parent!=null?parent.Name:"?")+"; type="+ch.ChartType+"; hasTitle="+ch.HasTitle+
                           "; left="+co.Left+"; top="+co.Top+"; width="+co.Width+"; height="+co.Height);
             if(ch.HasTitle) sb.AppendLine("title="+ch.ChartTitle.Text);
             try
@@ -328,7 +329,7 @@ namespace OMNIX.Core.Tools
         {
             var p=Pivot(wb,a); var sb=new StringBuilder();
             sb.AppendLine("Pivot="+p.Name+"; tableRange="+p.TableRange2.Address[false,false]+"; cacheIndex="+p.CacheIndex);
-            try{foreach(Excel.PivotField f in p.PivotFields()) sb.AppendLine("field="+f.Name+"; orientation="+f.Orientation+"; position="+f.Position);}catch{}
+            try{foreach(Excel.PivotField f in (Excel.PivotFields)p.PivotFields()) sb.AppendLine("field="+f.Name+"; orientation="+f.Orientation+"; position="+f.Position);}catch{}
             return TextUtil.Truncate(sb.ToString(),MaxText);
         }
 
@@ -370,7 +371,7 @@ namespace OMNIX.Core.Tools
             if(tableName.Length>0)
             {
                 var t=ws.ListObjects[tableName]; sb.AppendLine("table="+t.Name+"; range="+t.Range.Address[false,false]+"; showAutoFilter="+t.ShowAutoFilter);
-                try{var fs=t.AutoFilter.Filters; for(int i=1;i<=fs.Count;i++){var fl=fs.Item(i); sb.AppendLine("field="+i+"; on="+fl.On);}}catch{}
+                try{var fs=t.AutoFilter.Filters; for(int i=1;i<=fs.Count;i++){var fl=fs.Item[i]; sb.AppendLine("field="+i+"; on="+fl.On);}}catch{}
             }
             return sb.ToString();
         }
@@ -451,7 +452,7 @@ namespace OMNIX.Core.Tools
         private static Excel.Range RangeSingle(Excel.Workbook wb,ToolArguments a){var r=Range(wb,a);if(CellCount(r)!=1)throw new ArgumentException("This operation requires exactly one cell.");return r;}
         private static Excel.ListObject Table(Excel.Workbook wb,ToolArguments a){var ws=Sheet(wb,a.Get("sheet",""));string n=a.Get("table","");if(n.Length==0)throw new ArgumentException("table is required.");try{return ws.ListObjects[n];}catch{throw new ArgumentException("Table not found: "+n);}}
         private static Excel.ChartObject ChartObject(Excel.Workbook wb,ToolArguments a){var ws=Sheet(wb,a.Get("sheet",""));string n=a.Get("chart","");foreach(Excel.ChartObject co in (Excel.ChartObjects)ws.ChartObjects())if(string.Equals(co.Name,n,StringComparison.OrdinalIgnoreCase))return co;throw new ArgumentException("Chart not found: "+n);}
-        private static Excel.PivotTable Pivot(Excel.Workbook wb,ToolArguments a){var ws=Sheet(wb,a.Get("sheet",""));string n=a.Get("pivot","");try{return ws.PivotTables(n);}catch{throw new ArgumentException("PivotTable not found: "+n);}}
+        private static Excel.PivotTable Pivot(Excel.Workbook wb,ToolArguments a){var ws=Sheet(wb,a.Get("sheet",""));string n=a.Get("pivot","");try{return (Excel.PivotTable)ws.PivotTables(n);}catch{throw new ArgumentException("PivotTable not found: "+n);}}
         private static long CellCount(Excel.Range r){try{return Convert.ToInt64(r.Cells.CountLarge);}catch{return Convert.ToInt64(r.Cells.Count);}}
         private static int Int(ToolArguments a,string k,int min,int max,int fallback=0){int v;if(!int.TryParse(a.Get(k,fallback.ToString(CultureInfo.InvariantCulture)),NumberStyles.Integer,CultureInfo.InvariantCulture,out v)||v<min||v>max)throw new ArgumentException(k+" must be "+min+".."+max+".");return v;}
         private static double Double(ToolArguments a,string k,double min,double max,double fallback){double v;if(!double.TryParse(a.Get(k,fallback.ToString(CultureInfo.InvariantCulture)),NumberStyles.Float,CultureInfo.InvariantCulture,out v)||double.IsNaN(v)||double.IsInfinity(v)||v<min||v>max)throw new ArgumentException(k+" must be "+min+".."+max+".");return v;}
