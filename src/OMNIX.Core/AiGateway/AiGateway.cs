@@ -256,6 +256,22 @@ namespace OMNIX.Core.AiGateway
                     RuntimeDiagnosticJournal.AbandonRequest("provider_error", ex.Code);
                     throw;
                 }
+                catch (OperationCanceledException)
+                {
+                    sw.Stop();
+                    RuntimeDiagnosticJournal.Event("provider_call_end", null, "cancelled", sw.ElapsedMilliseconds, null,
+                        "round=" + (round + 1));
+                    RuntimeDiagnosticJournal.AbandonRequest("cancelled_provider", null);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    sw.Stop();
+                    RuntimeDiagnosticJournal.Event("provider_call_end", null, "exception", sw.ElapsedMilliseconds, null,
+                        "round=" + (round + 1) + "; type=" + ex.GetType().Name);
+                    RuntimeDiagnosticJournal.AbandonRequest("provider_exception", null);
+                    throw;
+                }
 
                 if (response == null)
                 {
