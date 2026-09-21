@@ -450,9 +450,9 @@ namespace OMNIX.Core.AiGateway
                 if (hostAdapter.Host == HostType.Excel)
                     sb.AppendLine("Excel read_document_section {sheet,row:1,column:1,rows:10,columns:8}: up to 256 cells, rows <=100 and columns <=32, one-based coordinates. Returns values and formulas, with partial coverage explicitly marked. Never treat a partial read as the whole sheet.");
                 else if (hostAdapter.Host == HostType.Word)
-                    sb.AppendLine("Word read_document_section {start:0,count:4000}: main-story character offsets, zero-based. Follow nextStart. Headers, footers, comments and text boxes are not included; disclose that limitation.");
+                    sb.AppendLine("Word read_document_map lists available object-model stories including main text, headers/footers, comments, footnotes/endnotes and text frames when present. Read them with read_document_section {story:'main',start:0,count:4000}; follow nextStart. This is direct Word structure, not a screenshot.");
                 else
-                    sb.AppendLine("PowerPoint read_document_section {slide:1,shape:1,start:0,count:3000}: one-based slide/shape and zero-based text offset. Enumerate shapes from the map and use slide images for non-text objects. Notes and nested groups are not included in this text tool.");
+                    sb.AppendLine("PowerPoint read_document_map reports text/table/group/picture/chart counts per slide. Use read_document_section {slide:1,shape:1,start:0,count:3000} for shape text/table/group metadata, or {slide:1,part:'notes',start:0,count:3000} for speaker notes. Pixel-level appearance still requires slide capture.");
             }
             sb.AppendLine("For a broader textual/structural question, request read_document (or read_presentation in PowerPoint) instead of guessing from the initial compact context.");
             sb.AppendLine("For visual inspection, request capture_current_view_as_image for the current Excel/Word/PowerPoint view/selection, capture_chart_as_image for an Excel chart, or capture_slide_as_image for a PowerPoint slide. OMNIX attaches the captured PNG to the next tool-result turn automatically when the active model supports Vision.");
