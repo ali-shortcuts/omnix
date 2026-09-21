@@ -87,8 +87,8 @@ Sources:
 
 OMNIX now exposes a queryable, host-specific Object Model capability catalog through
 `list_office_capabilities` and a single validated mutation boundary
-`execute_office_capability`. The catalog now contains **190 implemented operations**:
-**41 Excel**, **29 Word**, and **19 PowerPoint**, in addition to the existing bounded read,
+`execute_office_capability`. The catalog now contains **200 implemented operations**:
+**85 Excel**, **64 Word**, and **51 PowerPoint**, in addition to the existing bounded read,
 Vision, table-building, formula, formatting, notes, and slide tools.
 
 The capability engine covers major professional surfaces including worksheet/range/data validation, conditional formatting, workbook/worksheet protection, calculation, outline/grouping,

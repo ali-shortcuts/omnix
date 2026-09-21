@@ -111,6 +111,7 @@
     <Compile Include="Errors\OmnixErrors.cs" />
     <Compile Include="Localization\Strings.cs" />
     <Compile Include="Logging\Logger.cs" />
+    <Compile Include="Logging\RuntimeDiagnosticJournal.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Security\UntrustedData.cs" />
     <Compile Include="Settings\OmnixSettings.cs" />

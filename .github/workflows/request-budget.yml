@@ -85,6 +85,13 @@ jobs:
             -CorePath .\src\OMNIX.Core\bin\Release\OMNIX.Core.dll `
             -OutputPath .\build\artifact\image-normalization-acceptance.json
 
+      - name: Execute runtime diagnostic journal acceptance
+        shell: powershell
+        run: |
+          .\tools\runtime-diagnostic-journal-acceptance.ps1 `
+            -CorePath .\src\OMNIX.Core\bin\Release\OMNIX.Core.dll `
+            -OutputPath .\build\artifact\runtime-diagnostic-journal-acceptance.json
+
       - name: Validate sanitized acceptance reports
         shell: pwsh
         run: |
@@ -135,7 +142,17 @@ jobs:
           if (-not [bool]$image.OverallPass -or [int]$image.FailureCount -ne 0) {
             throw "Image-normalization runtime acceptance failed."
           }
-          Write-Host "OMNIX adaptive provider + request budget + Office tool isolation + diagnostic redaction + image normalization runtime acceptance: PASS"
+
+          $journalPath = '.\build\artifact\runtime-diagnostic-journal-acceptance.json'
+          if (-not (Test-Path $journalPath)) { throw "Runtime diagnostic journal report is missing." }
+          $journal = Get-Content $journalPath -Raw | ConvertFrom-Json
+          if ($journal.TestId -ne 'RUNTIME-DIAGNOSTIC-JOURNAL-001') { throw "Unexpected runtime diagnostic journal TestId." }
+          if (-not [bool]$journal.OverallPass -or [int]$journal.FailureCount -ne 0 -or
+              -not [bool]$journal.CorrelationPass -or -not [bool]$journal.ToolTimingPass -or
+              -not [bool]$journal.SecretRedactionPass -or -not [bool]$journal.NoPayloadContentPass) {
+            throw "Runtime diagnostic journal acceptance failed."
+          }
+          Write-Host "OMNIX adaptive provider + request budget + Office tool isolation + diagnostic redaction + image normalization + runtime journal acceptance: PASS"
 
       - name: Upload sanitized runtime evidence
         uses: actions/upload-artifact@v4
@@ -147,4 +164,5 @@ jobs:
             build/artifact/tool-request-isolation-acceptance.json
             build/artifact/provider-error-redaction-acceptance.json
             build/artifact/image-normalization-acceptance.json
+            build/artifact/runtime-diagnostic-journal-acceptance.json
           if-no-files-found: error

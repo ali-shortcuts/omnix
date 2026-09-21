@@ -58,30 +58,48 @@ namespace OMNIX.Core.Tools
             EnsureRequestScope(ct);
 
             if (call == null || !ToolNames.IsWhitelisted(call.Name))
+            {
+                RuntimeDiagnosticJournal.Event("executor_reject", call != null ? call.Name : null,
+                    "not_whitelisted", null, null, null);
                 return ToolResult.Fail("Tool not whitelisted: " + (call != null ? call.Name : "(null)"));
+            }
 
+            long dispatchTimer = RuntimeDiagnosticJournal.StartTimer();
             try
             {
                 Logger.Gateway("Tool dispatch: " + call.Name);
+                RuntimeDiagnosticJournal.Event("executor_dispatch", call.Name,
+                    ToolNames.IsWriteTool(call.Name) ? "write" : "read", null, null,
+                    "host=" + (adapter != null ? adapter.HostDisplayName : "none") + CapabilityDetail(call));
                 EnsureRequestScope(ct);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
                     : ExecuteRead(call, adapter, ct);
                 Logger.Gateway("Tool result: " + call.Name + "; success=" + result.Success);
+                RuntimeDiagnosticJournal.Event("executor_result", call.Name,
+                    result != null && result.Success ? "success" : "failed",
+                    RuntimeDiagnosticJournal.ElapsedMs(dispatchTimer), null, null);
                 return result;
             }
             catch (OperationCanceledException)
             {
+                RuntimeDiagnosticJournal.Event("executor_result", call != null ? call.Name : null,
+                    "cancelled", RuntimeDiagnosticJournal.ElapsedMs(dispatchTimer), null, null);
                 // Cancellation/scope loss is a request boundary. Never convert it into a
                 // model-visible TOOL ERROR because the caller must abort the entire tool loop.
                 throw;
             }
             catch (OmnixException ex)
             {
+                RuntimeDiagnosticJournal.Event("executor_result", call != null ? call.Name : null,
+                    "omnix_error", RuntimeDiagnosticJournal.ElapsedMs(dispatchTimer), ex.Code, null);
                 return ToolResult.Fail("TOOL ERROR [" + ex.Code + "]: " + ex.Message);
             }
             catch (Exception ex)
             {
+                RuntimeDiagnosticJournal.Event("executor_result", call != null ? call.Name : null,
+                    "exception", RuntimeDiagnosticJournal.ElapsedMs(dispatchTimer), null,
+                    "type=" + ex.GetType().Name);
                 Logger.Error("gateway", "Tool execution failed: " + call.Name, ex);
                 return ToolResult.Fail("TOOL ERROR: " + ex.Message);
             }
@@ -204,12 +222,18 @@ namespace OMNIX.Core.Tools
             EnsureRequestScope(ct);
 
             WritePreview preview;
+            long previewTimer = RuntimeDiagnosticJournal.StartTimer();
+            RuntimeDiagnosticJournal.Event("write_preview_start", call.Name, "start", null, null, null);
             try
             {
                 preview = adapter.PrepareWrite(call.Name, call.ArgumentsJson);
+                RuntimeDiagnosticJournal.Event("write_preview_end", call.Name, "success",
+                    RuntimeDiagnosticJournal.ElapsedMs(previewTimer), null, null);
             }
             catch (OmnixException ex)
             {
+                RuntimeDiagnosticJournal.Event("write_preview_end", call.Name, "error",
+                    RuntimeDiagnosticJournal.ElapsedMs(previewTimer), ex.Code, null);
                 return ToolResult.Fail("PREVIEW ERROR [" + ex.Code + "]: " + ex.Message);
             }
 
@@ -218,12 +242,20 @@ namespace OMNIX.Core.Tools
             Reveal(adapter, call, OfficeExecutionStage.Preview);
 
             if (WriteConfirmation == null)
+            {
+                RuntimeDiagnosticJournal.Event("write_confirmation", call.Name, "handler_unavailable", null, null, null);
                 return ToolResult.Fail("Write confirmation dialog is unavailable; change was NOT applied.");
+            }
 
             bool confirmed;
+            long confirmationTimer = RuntimeDiagnosticJournal.StartTimer();
+            RuntimeDiagnosticJournal.Event("write_confirmation", call.Name, "shown", null, null, null);
             try
             {
                 confirmed = await WriteConfirmation(preview).ConfigureAwait(true);
+                RuntimeDiagnosticJournal.Event("write_confirmation", call.Name,
+                    confirmed ? "approved" : "cancelled",
+                    RuntimeDiagnosticJournal.ElapsedMs(confirmationTimer), null, null);
             }
             catch (OperationCanceledException)
             {
@@ -231,6 +263,9 @@ namespace OMNIX.Core.Tools
             }
             catch (Exception ex)
             {
+                RuntimeDiagnosticJournal.Event("write_confirmation", call.Name, "exception",
+                    RuntimeDiagnosticJournal.ElapsedMs(confirmationTimer), null,
+                    "type=" + ex.GetType().Name);
                 Logger.Error("ui", "Write confirmation handler failed", ex);
                 confirmed = false;
             }
@@ -249,7 +284,26 @@ namespace OMNIX.Core.Tools
                 ? preview.ArgumentsJson
                 : call.ArgumentsJson;
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Apply);
-            adapter.ApplyWrite(call.Name, applyArguments);
+            long applyTimer = RuntimeDiagnosticJournal.StartTimer();
+            RuntimeDiagnosticJournal.Event("write_apply_start", call.Name, "start", null, null, null);
+            try
+            {
+                adapter.ApplyWrite(call.Name, applyArguments);
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "success",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), null, null);
+            }
+            catch (OmnixException ex)
+            {
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "omnix_error",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), ex.Code, null);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "exception",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), null, "type=" + ex.GetType().Name);
+                throw;
+            }
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Verify);
             string hint = call.Name == ToolNames.CreateDataTable
                 ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
@@ -260,6 +314,25 @@ namespace OMNIX.Core.Tools
         }
 
 
+        private static string CapabilityDetail(ToolCall call)
+        {
+            if (call == null || call.Name != ToolNames.ExecuteOfficeCapability) return "";
+            try
+            {
+                string id = ToolArguments.Parse(call.ArgumentsJson).Get("capability", "");
+                if (string.IsNullOrWhiteSpace(id)) return "";
+                var safe = new System.Text.StringBuilder();
+                foreach (char ch in id)
+                {
+                    if (safe.Length >= 100) break;
+                    if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.')
+                        safe.Append(ch);
+                }
+                return safe.Length == 0 ? "" : "; capability=" + safe.ToString();
+            }
+            catch { return ""; }
+        }
+
         private static void Reveal(IHostAdapter adapter, ToolCall call, OfficeExecutionStage stage)
         {
             var visible = adapter as IVisibleOfficeExecutionHost;
@@ -267,9 +340,12 @@ namespace OMNIX.Core.Tools
             try
             {
                 visible.RevealOperation(call.Name, ToolArguments.Parse(call.ArgumentsJson), stage);
+                RuntimeDiagnosticJournal.Event("office_reveal", call.Name, stage.ToString().ToLowerInvariant(), null, null, null);
             }
             catch (Exception ex)
             {
+                RuntimeDiagnosticJournal.Event("office_reveal", call.Name, "failed", null, null,
+                    "stage=" + stage + "; type=" + ex.GetType().Name);
                 // Moving the Office viewport is UX only. It must never turn a valid document
                 // operation into a failure, and it must never be reported as a fake execution.
                 Logger.Error("ui", "Visible Office execution could not reveal target for " + call.Name, ex);

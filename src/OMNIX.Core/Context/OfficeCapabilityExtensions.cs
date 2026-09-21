@@ -29,6 +29,8 @@ namespace OMNIX.Core.Context
             Add(x,HostType.Excel,"worksheet.protect","Worksheet","Protect worksheet contents/UI.","sheet,password(optional)");
             Add(x,HostType.Excel,"worksheet.unprotect","Worksheet","Unprotect worksheet.","sheet,password(optional)");
             Add(x,HostType.Excel,"worksheet.calculate","Calculation","Recalculate one worksheet.","sheet");
+            Add(x,HostType.Excel,"worksheet.delete","Worksheet","Delete a worksheet after normal OMNIX confirmation.","sheet");
+            Add(x,HostType.Excel,"worksheet.copy","Worksheet","Duplicate a worksheet to the end of the active workbook.","sheet,newName(optional)");
             Add(x,HostType.Excel,"view.gridlines","View","Show or hide gridlines in active window.","visible=true|false");
             Add(x,HostType.Excel,"view.headings","View","Show or hide row/column headings.","visible=true|false");
             Add(x,HostType.Excel,"view.zoom","View","Set active Excel window zoom.","percent=10..400");
@@ -37,6 +39,7 @@ namespace OMNIX.Core.Context
             Add(x,HostType.Excel,"range.copy","Editing","Copy source range to destination range in workbook.","sheet,address,destinationSheet,destinationAddress");
             Add(x,HostType.Excel,"range.copy_values","Editing","Copy only values to destination range.","sheet,address,destinationSheet,destinationAddress");
             Add(x,HostType.Excel,"range.style","Styles","Apply an existing Excel cell style.","sheet,address,style");
+            Add(x,HostType.Excel,"range.clear_all","Editing","Clear values, formulas, formatting, notes and validation from a bounded range.","sheet,address");
             Add(x,HostType.Excel,"outline.group_rows","Outline","Group target rows.","sheet,address");
             Add(x,HostType.Excel,"outline.ungroup_rows","Outline","Ungroup target rows.","sheet,address");
             Add(x,HostType.Excel,"outline.group_columns","Outline","Group target columns.","sheet,address");
@@ -53,6 +56,8 @@ namespace OMNIX.Core.Context
             Add(x,HostType.Excel,"chart.legend","Chart","Show/hide and position chart legend.","sheet,name,visible=true|false,position=right|left|top|bottom");
             Add(x,HostType.Excel,"chart.axis_titles","Chart","Set category/value axis titles.","sheet,name,categoryTitle,valueTitle");
             Add(x,HostType.Excel,"chart.data_labels","Chart","Show or hide series data labels.","sheet,name,visible=true|false");
+            Add(x,HostType.Excel,"chart.type","Chart","Change chart type.","sheet,name,type=column|bar|line|pie|area|scatter");
+            Add(x,HostType.Excel,"chart.source","Chart","Change chart source data to a bounded worksheet range.","sheet,name,address");
             Add(x,HostType.Excel,"shape.add","Shapes","Add rectangle, ellipse, roundedRectangle or arrow.","sheet,type,left,top,width,height,name(optional)");
             Add(x,HostType.Excel,"shape.text","Shapes","Set text in a worksheet shape.","sheet,shape,text");
             Add(x,HostType.Excel,"shape.format","Shapes","Format worksheet shape fill/line/text.","sheet,shape,fillColor,lineColor,fontColor,fontSize,bold");
@@ -70,6 +75,9 @@ namespace OMNIX.Core.Context
             Add(x,HostType.Word,"paragraph.pagination","Formatting","Set paragraph keep/page-break behavior.","keepTogether,keepWithNext,pageBreakBefore");
             Add(x,HostType.Word,"selection.shading","Formatting","Set selection shading color.","color=#RRGGBB");
             Add(x,HostType.Word,"selection.border","Formatting","Apply/remove simple selection border.","enabled=true|false");
+            Add(x,HostType.Word,"selection.highlight","Formatting","Set or clear selection highlight color.","color=none|yellow|green|cyan|pink|red|blue|turquoise|gray");
+            Add(x,HostType.Word,"selection.clear_formatting","Formatting","Clear direct character and paragraph formatting from current selection.","");
+            Add(x,HostType.Word,"hyperlink.remove_selection","Links","Remove hyperlinks from current selection while keeping visible text.","");
             Add(x,HostType.Word,"table.delete_row","Tables","Delete current table row.","");
             Add(x,HostType.Word,"table.delete_column","Tables","Delete current table column.","");
             Add(x,HostType.Word,"table.cell_text","Tables","Set text of a cell in current table.","row,column,text");
@@ -101,6 +109,7 @@ namespace OMNIX.Core.Context
             Add(x,HostType.PowerPoint,"slide.hidden","Slides","Hide or unhide a slide in slide show.","slide,hidden=true|false");
             Add(x,HostType.PowerPoint,"slide.layout","Slides","Set slide custom layout by one-based master layout index.","slide,layoutIndex");
             Add(x,HostType.PowerPoint,"presentation.size","Design","Set presentation slide width/height in points.","width,height");
+            Add(x,HostType.PowerPoint,"slide.follow_master_background","Design","Enable or disable master background on a slide.","slide,enabled=true|false");
             Add(x,HostType.PowerPoint,"shape.duplicate","Shapes","Duplicate a shape.","slide,shape");
             Add(x,HostType.PowerPoint,"shape.rename","Shapes","Rename a shape.","slide,shape,name");
             Add(x,HostType.PowerPoint,"shape.rotate","Shapes","Set shape rotation in degrees.","slide,shape,degrees");
@@ -112,6 +121,7 @@ namespace OMNIX.Core.Context
             Add(x,HostType.PowerPoint,"text.paragraph","Text","Set text paragraph alignment.","slide,shape,alignment=left|center|right|justify");
             Add(x,HostType.PowerPoint,"text.bullets","Text","Enable/disable bullets.","slide,shape,enabled=true|false");
             Add(x,HostType.PowerPoint,"text.autofit","Text","Set text AutoFit behavior.","slide,shape,mode=none|shrink|shapeToFit");
+            Add(x,HostType.PowerPoint,"text.margins","Text","Set text-frame internal margins in points.","slide,shape,left,right,top,bottom");
             Add(x,HostType.PowerPoint,"line.add","Shapes","Add a straight line.","slide,x1,y1,x2,y2");
             Add(x,HostType.PowerPoint,"connector.add","Shapes","Add a straight connector.","slide,x1,y1,x2,y2");
             Add(x,HostType.PowerPoint,"table.add_row","Tables","Add row to a table shape.","slide,shape");
@@ -155,6 +165,17 @@ namespace OMNIX.Core.Context
                 case "worksheet.protect": sheet().Protect(CapabilityArgs.S(a,"password","")); return true;
                 case "worksheet.unprotect": sheet().Unprotect(CapabilityArgs.S(a,"password","")); return true;
                 case "worksheet.calculate": sheet().Calculate(); return true;
+                case "worksheet.delete": {
+                    var ws=sheet(); bool alerts=app.DisplayAlerts;
+                    try { app.DisplayAlerts=false; ws.Delete(); }
+                    finally { app.DisplayAlerts=alerts; }
+                    return true; }
+                case "worksheet.copy": {
+                    var ws=sheet(); ws.Copy(After:wb.Sheets[wb.Sheets.Count]);
+                    var copy=app.ActiveSheet as Excel.Worksheet;
+                    string newName=CapabilityArgs.S(a,"newName","");
+                    if(copy!=null && newName.Length>0) copy.Name=newName;
+                    return true; }
                 case "view.gridlines": app.ActiveWindow.DisplayGridlines=CapabilityArgs.B(a,"visible",true); return true;
                 case "view.headings": app.ActiveWindow.DisplayHeadings=CapabilityArgs.B(a,"visible",true); return true;
                 case "view.zoom": app.ActiveWindow.Zoom=CapabilityArgs.I(a,"percent",100,10,400); return true;
@@ -168,6 +189,7 @@ namespace OMNIX.Core.Context
                     var src=range(); string ds=CapabilityArgs.S(a,"destinationSheet",sheet().Name); string da=CapabilityArgs.S(a,"destinationAddress","");
                     var dest=(wb.Worksheets[ds] as Excel.Worksheet).Range[da]; dest.Resize[src.Rows.Count,src.Columns.Count].Value2=src.Value2; return true; }
                 case "range.style": range().Style=CapabilityArgs.S(a,"style","Normal"); return true;
+                case "range.clear_all": range().Clear(); return true;
                 case "outline.group_rows": range().EntireRow.Group(); return true;
                 case "outline.ungroup_rows": range().EntireRow.Ungroup(); return true;
                 case "outline.group_columns": range().EntireColumn.Group(); return true;
@@ -199,6 +221,19 @@ namespace OMNIX.Core.Context
                 case "chart.data_labels": {
                     var ch=((Excel.ChartObject)sheet().ChartObjects(CapabilityArgs.S(a,"name",""))).Chart; bool show=CapabilityArgs.B(a,"visible",true);
                     foreach(Excel.Series s in (Excel.SeriesCollection)ch.SeriesCollection()) { if(show)s.ApplyDataLabels(); else if(s.HasDataLabels){var labels=(Excel.DataLabels)s.DataLabels();labels.Delete();} } return true; }
+                case "chart.type": {
+                    var ch=((Excel.ChartObject)sheet().ChartObjects(CapabilityArgs.S(a,"name",""))).Chart;
+                    string type=CapabilityArgs.S(a,"type","column").ToLowerInvariant();
+                    ch.ChartType=type=="line"?Excel.XlChartType.xlLine:
+                        type=="pie"?Excel.XlChartType.xlPie:
+                        type=="bar"?Excel.XlChartType.xlBarClustered:
+                        type=="area"?Excel.XlChartType.xlArea:
+                        type=="scatter"?Excel.XlChartType.xlXYScatter:
+                        Excel.XlChartType.xlColumnClustered;
+                    return true; }
+                case "chart.source": {
+                    var ch=((Excel.ChartObject)sheet().ChartObjects(CapabilityArgs.S(a,"name",""))).Chart;
+                    ch.SetSourceData(range()); return true; }
                 case "shape.add": {
                     var ws=sheet(); string type=CapabilityArgs.S(a,"type","rectangle").ToLowerInvariant();
                     var mt=type=="ellipse"?Office.MsoAutoShapeType.msoShapeOval:type=="roundedrectangle"?Office.MsoAutoShapeType.msoShapeRoundedRectangle:type=="arrow"?Office.MsoAutoShapeType.msoShapeRightArrow:Office.MsoAutoShapeType.msoShapeRectangle;
@@ -243,6 +278,23 @@ namespace OMNIX.Core.Context
                 case "paragraph.pagination": { var p=sel.ParagraphFormat;p.KeepTogether=CapabilityArgs.B(a,"keepTogether",false)?-1:0;p.KeepWithNext=CapabilityArgs.B(a,"keepWithNext",false)?-1:0;p.PageBreakBefore=CapabilityArgs.B(a,"pageBreakBefore",false)?-1:0;return true; }
                 case "selection.shading": sel.Range.Shading.BackgroundPatternColor=(Word.WdColor)CapabilityArgs.ColorOle(CapabilityArgs.S(a,"color",""));return true;
                 case "selection.border": sel.Range.Borders.Enable=CapabilityArgs.B(a,"enabled",true)?1:0;return true;
+                case "selection.highlight": {
+                    string v=CapabilityArgs.S(a,"color","yellow").ToLowerInvariant();
+                    sel.Range.HighlightColorIndex=
+                        v=="none"?Word.WdColorIndex.wdNoHighlight:
+                        v=="green"?Word.WdColorIndex.wdBrightGreen:
+                        v=="cyan"?Word.WdColorIndex.wdTurquoise:
+                        v=="pink"?Word.WdColorIndex.wdPink:
+                        v=="red"?Word.WdColorIndex.wdRed:
+                        v=="blue"?Word.WdColorIndex.wdBlue:
+                        v=="turquoise"?Word.WdColorIndex.wdTurquoise:
+                        v=="gray"?Word.WdColorIndex.wdGray25:
+                        Word.WdColorIndex.wdYellow;
+                    return true; }
+                case "selection.clear_formatting": sel.ClearFormatting(); return true;
+                case "hyperlink.remove_selection": {
+                    while(sel.Range.Hyperlinks.Count>0) sel.Range.Hyperlinks[1].Delete();
+                    return true; }
                 case "table.delete_row": table().Rows[1].Delete();return true;
                 case "table.delete_column": table().Columns[1].Delete();return true;
                 case "table.cell_text": { var t=table();t.Cell(CapabilityArgs.I(a,"row",1,1,t.Rows.Count),CapabilityArgs.I(a,"column",1,1,t.Columns.Count)).Range.Text=CapabilityArgs.S(a,"text","");return true; }
@@ -283,6 +335,7 @@ namespace OMNIX.Core.Context
                 case "slide.hidden": slide().SlideShowTransition.Hidden=CapabilityArgs.B(a,"hidden",true)?Office.MsoTriState.msoTrue:Office.MsoTriState.msoFalse;return true;
                 case "slide.layout": { int ix=CapabilityArgs.I(a,"layoutIndex",1,1,p.SlideMaster.CustomLayouts.Count);slide().CustomLayout=p.SlideMaster.CustomLayouts[ix];return true; }
                 case "presentation.size": p.PageSetup.SlideWidth=(float)CapabilityArgs.D(a,"width",960,100,5000);p.PageSetup.SlideHeight=(float)CapabilityArgs.D(a,"height",540,100,5000);return true;
+                case "slide.follow_master_background": slide().FollowMasterBackground=CapabilityArgs.B(a,"enabled",true)?Office.MsoTriState.msoTrue:Office.MsoTriState.msoFalse;return true;
                 case "shape.duplicate": shape().Duplicate().Select();return true;
                 case "shape.rename": shape().Name=CapabilityArgs.S(a,"name","Shape");return true;
                 case "shape.rotate": shape().Rotation=(float)CapabilityArgs.D(a,"degrees",0,-360,360);return true;
@@ -294,6 +347,13 @@ namespace OMNIX.Core.Context
                 case "text.paragraph": {var sh=shape();var pf=sh.TextFrame.TextRange.ParagraphFormat;string al=CapabilityArgs.S(a,"alignment","left");pf.Alignment=al=="center"?Ppt.PpParagraphAlignment.ppAlignCenter:al=="right"?Ppt.PpParagraphAlignment.ppAlignRight:al=="justify"?Ppt.PpParagraphAlignment.ppAlignJustify:Ppt.PpParagraphAlignment.ppAlignLeft;return true;}
                 case "text.bullets": shape().TextFrame.TextRange.ParagraphFormat.Bullet.Visible=CapabilityArgs.B(a,"enabled",true)?Office.MsoTriState.msoTrue:Office.MsoTriState.msoFalse;return true;
                 case "text.autofit": {string m=CapabilityArgs.S(a,"mode","none");shape().TextFrame2.AutoSize=m=="shrink"?Office.MsoAutoSize.msoAutoSizeTextToFitShape:m=="shapetofit"?Office.MsoAutoSize.msoAutoSizeShapeToFitText:Office.MsoAutoSize.msoAutoSizeNone;return true;}
+                case "text.margins": {
+                    var tf=shape().TextFrame;
+                    tf.MarginLeft=(float)CapabilityArgs.D(a,"left",7.2,0,500);
+                    tf.MarginRight=(float)CapabilityArgs.D(a,"right",7.2,0,500);
+                    tf.MarginTop=(float)CapabilityArgs.D(a,"top",3.6,0,500);
+                    tf.MarginBottom=(float)CapabilityArgs.D(a,"bottom",3.6,0,500);
+                    return true; }
                 case "line.add": slide().Shapes.AddLine((float)CapabilityArgs.D(a,"x1",10,-5000,10000),(float)CapabilityArgs.D(a,"y1",10,-5000,10000),(float)CapabilityArgs.D(a,"x2",200,-5000,10000),(float)CapabilityArgs.D(a,"y2",10,-5000,10000)).Select();return true;
                 case "connector.add": slide().Shapes.AddConnector(Office.MsoConnectorType.msoConnectorStraight,(float)CapabilityArgs.D(a,"x1",10,-5000,10000),(float)CapabilityArgs.D(a,"y1",10,-5000,10000),(float)CapabilityArgs.D(a,"x2",200,-5000,10000),(float)CapabilityArgs.D(a,"y2",10,-5000,10000)).Select();return true;
                 case "table.add_row": {var sh=shape();if(sh.HasTable!=Office.MsoTriState.msoTrue)throw new InvalidOperationException("Shape is not a table.");sh.Table.Rows.Add();return true;}
