@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IAdvancedOfficeCapabilityHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -36,7 +36,7 @@ namespace OMNIX.Core.Context
         {
             get
             {
-                return "PowerPoint direct object-model access: presentation/slide map, shape text, tables, grouped objects, speaker notes, slide/current-view capture, confirmed slide insertion and speaker-note updates. OMNIX visibly navigates to the real slide/shape and activates the relevant native Ribbon tab when possible.";
+                return "PowerPoint broad Object Model capability layer: presentation/slide/section inspection; slide create/delete/duplicate/move/layout; shapes/text/tables; fill/line/size/rotation; notes; hyperlinks; transitions; basic animations; view navigation; current-view/slide capture. Use list_office_capabilities for the exact registry. VBA/macro execution, Trust Center/security changes, arbitrary files/processes and unknown COM reflection are not exposed.";
             }
         }
 
@@ -44,7 +44,7 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
-            ActivateRelevantRibbonTab(toolName);
+            ActivateRelevantRibbonTab(toolName, args);
             try
             {
                 var pres = _app.ActivePresentation;
@@ -68,6 +68,17 @@ namespace OMNIX.Core.Context
                 try { win.View.GotoSlide(slideIndex); } catch { }
                 var slide = pres.Slides[slideIndex];
 
+                if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
+                {
+                    int shapeIndex = 0;
+                    int.TryParse(args.Get("shape", "0"), out shapeIndex);
+                    if (shapeIndex >= 1 && shapeIndex <= slide.Shapes.Count)
+                    {
+                        try { slide.Shapes[shapeIndex].Select(Office.MsoTriState.msoFalse); } catch { }
+                    }
+                    return;
+                }
+
                 if (toolName == ToolNames.ReadDocumentSection)
                 {
                     int shapeIndex = 0;
@@ -84,17 +95,37 @@ namespace OMNIX.Core.Context
             }
         }
 
-        private void ActivateRelevantRibbonTab(string toolName)
+        private void ActivateRelevantRibbonTab(string toolName, ToolArguments args)
         {
             string tab = null;
-            switch (toolName)
+            if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
             {
-                case ToolNames.InsertSlide: tab = "TabHome"; break;
-                case ToolNames.AddSpeakerNotes: tab = "TabView"; break;
-                case ToolNames.ReadDocumentMap:
-                case ToolNames.ReadDocumentSection:
-                case ToolNames.CaptureSlideAsImage:
-                case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+                string op = args != null ? args.Get("operation", "") : "";
+                if (op.StartsWith("animation.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabAnimations";
+                else if (op.StartsWith("transition.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabTransitions";
+                else if (op.StartsWith("shape.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("text.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabInsert";
+                else if (op.StartsWith("slide.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabHome";
+                else
+                    tab = "TabView";
+            }
+            else
+            {
+                switch (toolName)
+                {
+                    case ToolNames.InsertSlide: tab = "TabHome"; break;
+                    case ToolNames.AddSpeakerNotes: tab = "TabView"; break;
+                    case ToolNames.ReadDocumentMap:
+                    case ToolNames.ReadDocumentSection:
+                    case ToolNames.CaptureSlideAsImage:
+                    case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+                }
             }
             if (tab == null || _ribbonUi == null) return;
             try { _ribbonUi.ActivateTabMso(tab); }
@@ -350,6 +381,9 @@ namespace OMNIX.Core.Context
 
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ApplyOfficeCapability)
+                return PrepareCapabilityWrite(argumentsJson);
+
             var args = ToolArguments.Parse(argumentsJson);
             switch (toolName)
             {
@@ -392,12 +426,18 @@ namespace OMNIX.Core.Context
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
                         "Tool '" + toolName + "' is not supported by PowerPoint.",
-                        "PowerPointHostAdapter.PrepareWrite", "Use insert_slide or add_speaker_notes.");
+                        "PowerPointHostAdapter.PrepareWrite", "Use insert_slide, add_speaker_notes or apply_office_capability.");
             }
         }
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ApplyOfficeCapability)
+            {
+                ApplyCapabilityWrite(argumentsJson);
+                return;
+            }
+
             var args = ToolArguments.Parse(argumentsJson);
             var pres = _app.ActivePresentation;
             if (pres == null)
@@ -445,6 +485,23 @@ namespace OMNIX.Core.Context
             }
             Logging.Logger.Install("PowerPoint write tool applied: " + toolName);
         }
+
+        public string InspectCapability(ToolArguments arguments)
+        {
+            return PowerPointAdvancedCapabilities.Inspect(this, arguments);
+        }
+
+        public WritePreview PrepareCapabilityWrite(string argumentsJson)
+        {
+            return PowerPointAdvancedCapabilities.Prepare(this, argumentsJson);
+        }
+
+        public void ApplyCapabilityWrite(string argumentsJson)
+        {
+            PowerPointAdvancedCapabilities.Apply(this, argumentsJson);
+        }
+
+        internal Ppt.Application App { get { return _app; } }
 
         private Ppt.Slide ResolveActiveSlide()
         {
