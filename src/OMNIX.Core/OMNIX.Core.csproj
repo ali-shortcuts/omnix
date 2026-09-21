@@ -90,6 +90,7 @@
     <Compile Include="AiGateway\Adapters\OllamaAdapter.cs" />
     <Compile Include="AiGateway\Adapters\OpenRouterAdapter.cs" />
     <Compile Include="AiGateway\AiGateway.cs" />
+    <Compile Include="AiGateway\MutationIntentDetector.cs" />
     <Compile Include="AiGateway\Http\OpenAiCompatibleClient.cs" />
     <Compile Include="AiGateway\Http\SseLineReader.cs" />
     <Compile Include="AiGateway\Models\Models.cs" />
