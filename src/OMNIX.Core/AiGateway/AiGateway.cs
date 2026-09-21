@@ -240,6 +240,8 @@ namespace OMNIX.Core.AiGateway
                 {
                     visibleDelta.Complete(true, null);
                     Logger.Gateway("Provider returned null response; mutationRequested=" + mutationRequested);
+                    RuntimeDiagnosticJournal.Event("provider_response", null, "null", null, null,
+                        "mutationRequested=" + mutationRequested);
                     if (mutationRequested && !writeAttempted)
                     {
                         if (mutationRepairTurns++ < MaxMutationRepairTurns)
@@ -262,10 +264,14 @@ namespace OMNIX.Core.AiGateway
                     visibleDelta.Complete(true, response.Text);
                     responseKind = "native_tool_call";
                     Logger.Gateway("Provider response_kind=native_tool_call; count=" + response.ToolCalls.Count);
+                    RuntimeDiagnosticJournal.Event("provider_response", null, "native_tool_call", null, null,
+                        "count=" + response.ToolCalls.Count);
 
                     if (response.ToolCalls.Count != 1)
                     {
                         Logger.Gateway("Tool protocol rejected: reason=multiple_native_calls; count=" + response.ToolCalls.Count);
+                        RuntimeDiagnosticJournal.Event("tool_protocol_reject", null, "multiple_native_calls", null, null,
+                            "count=" + response.ToolCalls.Count + "; repairTurn=" + protocolRepairTurns);
                         if (protocolRepairTurns++ < MaxProtocolRepairTurns)
                         {
                             history.Add(current);
@@ -298,6 +304,7 @@ namespace OMNIX.Core.AiGateway
                     }
                     visibleDelta.Complete(call == null, response.Text);
                     Logger.Gateway("Provider response_kind=" + responseKind);
+                    RuntimeDiagnosticJournal.Event("provider_response", call != null ? call.Name : null, responseKind, null, null, null);
                 }
 
                 if (call != null)
@@ -307,6 +314,8 @@ namespace OMNIX.Core.AiGateway
                     {
                         Logger.Gateway("Tool protocol rejected: reason=malformed_arguments; tool=" +
                                        SafeToolName(call.Name) + "; detail=" + argumentError);
+                        RuntimeDiagnosticJournal.Event("tool_protocol_reject", call.Name, "malformed_arguments", null, null,
+                            "detail=" + argumentError + "; repairTurn=" + protocolRepairTurns);
                         if (protocolRepairTurns++ < MaxProtocolRepairTurns)
                         {
                             history.Add(current);
@@ -326,6 +335,9 @@ namespace OMNIX.Core.AiGateway
                     Logger.Gateway("Tool parsed: source=" + responseKind + "; tool=" + SafeToolName(call.Name) +
                                    "; whitelisted=" + ToolNames.IsWhitelisted(call.Name) +
                                    "; write=" + ToolNames.IsWriteTool(call.Name));
+                    RuntimeDiagnosticJournal.Event("tool_parsed", call.Name,
+                        ToolNames.IsWhitelisted(call.Name) ? "accepted" : "not_whitelisted", null, null,
+                        "source=" + responseKind + "; write=" + ToolNames.IsWriteTool(call.Name));
                 }
 
                 if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text))
@@ -358,6 +370,8 @@ namespace OMNIX.Core.AiGateway
                     if (mutationRequested && !writeAttempted)
                     {
                         Logger.Gateway("Mutation enforcement: text-only response before any write; repairTurn=" + mutationRepairTurns);
+                        RuntimeDiagnosticJournal.Event("mutation_repair", null, "text_without_write", null, null,
+                            "repairTurn=" + mutationRepairTurns);
                         if (mutationRepairTurns++ < MaxMutationRepairTurns)
                         {
                             history.Add(current);
@@ -386,6 +400,8 @@ namespace OMNIX.Core.AiGateway
                     if (mutationRequested && writeSucceeded && !lastWriteVerified)
                     {
                         Logger.Gateway("Verification enforcement: final text before read-back; repairTurn=" + verificationRepairTurns);
+                        RuntimeDiagnosticJournal.Event("verification_repair", null, "final_before_readback", null, null,
+                            "repairTurn=" + verificationRepairTurns);
                         if (verificationRepairTurns++ < MaxMutationRepairTurns)
                         {
                             history.Add(current);
@@ -420,16 +436,23 @@ namespace OMNIX.Core.AiGateway
                         string suffix = "\n\nOMNIX runtime verification: " + successfulWrites +
                                         " write operation(s) succeeded and " + failedWrites +
                                         " write operation(s) failed or were cancelled. Treat the task as partially complete unless all requested steps were verified.";
+                        RuntimeDiagnosticJournal.CompleteRequest("partial", successfulWrites, failedWrites, lastWriteVerified);
                         return new ChatResponse { Text = (response.Text ?? "") + suffix, Model = response.Model };
                     }
 
                     final = response;
+                    RuntimeDiagnosticJournal.CompleteRequest(
+                        failedWrites > 0 ? "partial" : "success",
+                        successfulWrites, failedWrites,
+                        !mutationRequested || !writeSucceeded || lastWriteVerified);
                     return final;
                 }
 
                 if (!ToolNames.IsWhitelisted(call.Name))
                 {
                     Logger.Gateway("Tool protocol rejected: reason=not_whitelisted; tool=" + SafeToolName(call.Name));
+                    RuntimeDiagnosticJournal.Event("tool_protocol_reject", call.Name, "not_whitelisted", null, null,
+                        "repairTurn=" + protocolRepairTurns);
                     if (protocolRepairTurns++ < MaxProtocolRepairTurns)
                     {
                         history.Add(current);
@@ -451,7 +474,20 @@ namespace OMNIX.Core.AiGateway
                 bool isWrite = ToolNames.IsWriteTool(call.Name);
                 if (isWrite) writeAttempted = true;
 
-                ToolResult result = await toolExecutor.ExecuteAsync(call, hostAdapter).ConfigureAwait(true);
+                long toolTimer = RuntimeDiagnosticJournal.StartTimer();
+                RuntimeDiagnosticJournal.Event("tool_execute_start", call.Name, isWrite ? "write" : "read", null, null, null);
+                ToolResult result;
+                try
+                {
+                    result = await toolExecutor.ExecuteAsync(call, hostAdapter).ConfigureAwait(true);
+                }
+                catch (OperationCanceledException)
+                {
+                    RuntimeDiagnosticJournal.Event("tool_execute_end", call.Name, "cancelled",
+                        RuntimeDiagnosticJournal.ElapsedMs(toolTimer), null, null);
+                    RuntimeDiagnosticJournal.AbandonRequest("cancelled_tool", null);
+                    throw;
+                }
                 if (isWrite)
                 {
                     if (result != null && result.Success)
@@ -471,11 +507,16 @@ namespace OMNIX.Core.AiGateway
                 {
                     lastWriteVerified = true;
                     Logger.Gateway("Read-back verification completed after latest write; tool=" + SafeToolName(call.Name));
+                    RuntimeDiagnosticJournal.Event("write_verification", call.Name, "verified", null, null, null);
                 }
 
                 Logger.Gateway("Tool completed: tool=" + SafeToolName(call.Name) +
                                "; success=" + (result != null && result.Success) +
                                "; successfulWrites=" + successfulWrites + "; failedWrites=" + failedWrites);
+                RuntimeDiagnosticJournal.Event("tool_execute_end", call.Name,
+                    result != null && result.Success ? "success" : "failed",
+                    RuntimeDiagnosticJournal.ElapsedMs(toolTimer), null,
+                    "successfulWrites=" + successfulWrites + "; failedWrites=" + failedWrites);
 
                 history.Add(current);
                 history.Add(new ChatTurn
@@ -513,6 +554,7 @@ namespace OMNIX.Core.AiGateway
             if (final == null)
                 final = new ChatResponse { Text = string.Empty };
             // Never return the last internal tool call as if it were a completed user answer.
+            RuntimeDiagnosticJournal.CompleteRequest("bounded_limit", successfulWrites, failedWrites, lastWriteVerified);
             return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
         }
 
@@ -581,6 +623,8 @@ namespace OMNIX.Core.AiGateway
 
         private static ChatResponse MutationRuntimeFailure(string message)
         {
+            RuntimeDiagnosticJournal.Event("runtime_failure", null, "safe_stop", null, null, "category=mutation_or_tool_runtime");
+            RuntimeDiagnosticJournal.CompleteRequest("runtime_failure", 0, 0, false);
             return new ChatResponse
             {
                 Text = "OMNIX runtime stopped safely: " + message,
