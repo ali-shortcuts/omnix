@@ -21,6 +21,7 @@ namespace OMNIX.PowerPoint
 
         internal PowerPointHostAdapter Adapter { get; private set; }
         internal PowerPointTaskPaneService Panes { get; private set; }
+        internal OmnixRibbon Ribbon { get; private set; }
 
         internal static AiGateway SharedGateway;
         internal static ChatHistoryStore SharedHistory;
@@ -40,6 +41,8 @@ namespace OMNIX.PowerPoint
 
             Adapter = new PowerPointHostAdapter(Application,
                 () => SettingsManager.Instance.Settings.ContextMaxChars);
+
+            if (Ribbon != null) Ribbon.BindAdapterIfReady();
 
             EnsureSharedServices();
 
@@ -104,7 +107,8 @@ namespace OMNIX.PowerPoint
         protected override Office.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
             Logger.Startup("CreateRibbonExtensibilityObject -> OmnixRibbon");
-            return new OmnixRibbon(this);
+            Ribbon = new OmnixRibbon(this);
+            return Ribbon;
         }
 
         #region VSTO generated code
