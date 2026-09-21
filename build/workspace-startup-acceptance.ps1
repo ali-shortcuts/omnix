@@ -57,6 +57,7 @@ class WorkspaceStartupRegression {
         foreach (ThemeMode mode in new[]{ThemeMode.Dark,ThemeMode.Light}) {
             SettingsManager.Instance.Settings.Theme=mode; ThemeManager.Instance.ApplyTo(view);
             var settings=view.Settings;
+            ((Expander)settings.FindName("GeneralSettingsExpander")).IsExpanded = true;
             var provider=(ComboBox)settings.FindName("ProviderCombo");
             provider.ItemsSource=new ProviderRegistry().All.Select(p=>p.Info).ToList();
             provider.DisplayMemberPath="DisplayName";

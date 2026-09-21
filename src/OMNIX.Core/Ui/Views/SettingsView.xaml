@@ -228,7 +228,7 @@
                       Content="{DynamicResource S.Settings.PreferLocal}" />
 
             </StackPanel>
-            <Expander Header="General settings" Foreground="{DynamicResource B.Foreground}" Margin="0,12,0,0"><StackPanel>
+            <Expander x:Name="GeneralSettingsExpander" Header="General settings" Foreground="{DynamicResource B.Foreground}" Margin="0,12,0,0"><StackPanel>
             <!-- ============ Privacy ============ -->
             <TextBlock Text="Privacy" Style="{StaticResource Section}" />
             <RadioButton x:Name="PrivacyLocalOnly" Style="{StaticResource Radio}"

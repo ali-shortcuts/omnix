@@ -18,7 +18,7 @@ namespace OMNIX.Core.Reference
         {
             query = (query ?? "").Trim();
             if (string.Equals(host, "Word", StringComparison.OrdinalIgnoreCase))
-                return "Word table formulas are fields, not an Excel workbook. Example: =SUM(ABOVE). Update fields after editing data. Supported functions and examples: https://support.microsoft.com/en-us/word/use-a-formula-in-a-word-table\nOMNIX currently edits selected text; this reference does not enable every Word command.";
+                return "Word table formulas are fields, not an Excel workbook. Microsoft lists 18 functions: ABS, AND, AVERAGE, COUNT, DEFINED, FALSE, IF, INT, MAX, MIN, MOD, NOT, OR, PRODUCT, ROUND, SIGN, SUM, TRUE. Example: =SUM(ABOVE). Update fields after editing data. Supported functions and examples: https://support.microsoft.com/en-us/word/use-a-formula-in-a-word-table\nOMNIX currently edits selected text; this reference does not enable every Word command.";
             if (string.Equals(host, "PowerPoint", StringComparison.OrdinalIgnoreCase))
                 return "PowerPoint: slides, shapes, notes and visual layout. There is no Excel-style worksheet function catalog for slide text. OMNIX currently inserts slides and writes speaker notes; chart data and arbitrary ribbon commands are not covered.";
             var matches = Excel.Value.Where(p => p.Key.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
