@@ -140,12 +140,12 @@ class WorkspaceStartupRegression {
         Check(ToolNames.IsWhitelisted(ToolNames.FormatRange) && ToolNames.IsWriteTool(ToolNames.FormatRange),"format_range must remain inside confirmed write boundary");
         Check(ToolNames.IsWhitelisted(ToolNames.ListOfficeCapabilities) && !ToolNames.IsWriteTool(ToolNames.ListOfficeCapabilities),"capability discovery must be read-only");
         Check(ToolNames.IsWhitelisted(ToolNames.ExecuteOfficeCapability) && ToolNames.IsWriteTool(ToolNames.ExecuteOfficeCapability),"capability execution must remain inside confirmed write boundary");
-        Check(OfficeCapabilityRegistry.ForHost(HostType.Excel).Count >= 35,"Excel capability catalog is unexpectedly narrow");
-        Check(OfficeCapabilityRegistry.ForHost(HostType.Word).Count >= 25,"Word capability catalog is unexpectedly narrow");
-        Check(OfficeCapabilityRegistry.ForHost(HostType.PowerPoint).Count >= 15,"PowerPoint capability catalog is unexpectedly narrow");
-        Check(OfficeCapabilityRegistry.Search(HostType.Excel,"chart",0).Contains("chart.create"),"Excel chart capability discovery failed");
-        Check(OfficeCapabilityRegistry.Search(HostType.Word,"review",0).Contains("review.track_changes"),"Word review capability discovery failed");
-        Check(OfficeCapabilityRegistry.Search(HostType.PowerPoint,"animation",0).Contains("animation.fade"),"PowerPoint animation capability discovery failed");
+        Check(OfficeCapabilityRegistry.ForHost(HostType.Excel).Count >= 75,"Excel capability catalog is unexpectedly narrow");
+        Check(OfficeCapabilityRegistry.ForHost(HostType.Word).Count >= 55,"Word capability catalog is unexpectedly narrow");
+        Check(OfficeCapabilityRegistry.ForHost(HostType.PowerPoint).Count >= 45,"PowerPoint capability catalog is unexpectedly narrow");
+        Check(OfficeCapabilityRegistry.Search(HostType.Excel,"chart",0).Contains("chart.create") && OfficeCapabilityRegistry.Search(HostType.Excel,"conditional",0).Contains("conditional.formula"),"Excel advanced capability discovery failed");
+        Check(OfficeCapabilityRegistry.Search(HostType.Word,"review",0).Contains("review.track_changes") && OfficeCapabilityRegistry.Search(HostType.Word,"content",0).Contains("content_control.add"),"Word advanced capability discovery failed");
+        Check(OfficeCapabilityRegistry.Search(HostType.PowerPoint,"animation",0).Contains("animation.fade") && OfficeCapabilityRegistry.Search(HostType.PowerPoint,"table",0).Contains("table.cell_format"),"PowerPoint advanced capability discovery failed");
         Check(prompt.Contains("list_office_capabilities") && prompt.Contains("execute_office_capability"),"Capability engine missing from model prompt");
         Check(!prompt.Contains("rewrite_selected_text {text}"),"Foreign host write tool advertised");
         using(var controller=new WorkspaceController(host,new ChatHistoryStore())) {
