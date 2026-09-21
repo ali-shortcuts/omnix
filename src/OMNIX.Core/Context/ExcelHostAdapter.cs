@@ -675,7 +675,11 @@ namespace OMNIX.Core.Context
 
             string after;
             if (toolName == ToolNames.WriteToCell)
-                after = target.Address[false, false] + " will contain: " + TextUtil.Truncate(args.Get("value", ""), 2000);
+            {
+                var valueToken = args.Token("value");
+                string previewValue = valueToken == null ? "" : valueToken.ToString(Newtonsoft.Json.Formatting.None);
+                after = target.Address[false, false] + " will contain: " + TextUtil.Truncate(previewValue, 2000);
+            }
             else if (toolName == ToolNames.InsertFormula)
                 after = target.Address[false, false] + " formula will be: " + TextUtil.Truncate(args.Get("formula", args.Get("value", "")), 2000);
             else if (toolName == ToolNames.FormatRange)
@@ -703,7 +707,7 @@ namespace OMNIX.Core.Context
             switch (toolName)
             {
                 case ToolNames.WriteToCell:
-                    target.Value2 = args.Get("value", "");
+                    ApplyTypedCellValue(target, args.Token("value"));
                     break;
                 case ToolNames.InsertFormula:
                     target.NumberFormat = "General";
@@ -798,12 +802,27 @@ namespace OMNIX.Core.Context
 
             if (toolName == ToolNames.WriteToCell)
             {
-                string value = args.Get("value", "") ?? "";
-                if (value.Length > ExcelCellTextLimit)
+                var valueToken = args.Token("value");
+                if (valueToken != null && valueToken.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                {
+                    string value = valueToken.ToString();
+                    if (value.Length > ExcelCellTextLimit)
+                        throw new OmnixException(ErrorCode.CORE_ERROR,
+                            "Cell value is too large for Excel.",
+                            "write_to_cell length=" + value.Length + "; Excel limit=" + ExcelCellTextLimit + ".",
+                            "Shorten the value or split it across cells deliberately.");
+                }
+                else if (valueToken != null &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Integer &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Float &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Boolean &&
+                         valueToken.Type != Newtonsoft.Json.Linq.JTokenType.Null)
+                {
                     throw new OmnixException(ErrorCode.CORE_ERROR,
-                        "Cell value is too large for Excel.",
-                        "write_to_cell length=" + value.Length + "; Excel limit=" + ExcelCellTextLimit + ".",
-                        "Shorten the value or split it across cells deliberately.");
+                        "write_to_cell accepts only text, number, boolean or null.",
+                        "Unsupported JSON value type=" + valueToken.Type,
+                        "Use create_data_table for structured multi-cell data.");
+                }
             }
             else if (toolName == ToolNames.InsertFormula)
             {
@@ -819,6 +838,40 @@ namespace OMNIX.Core.Context
             }
 
             return target;
+        }
+
+        private static void ApplyTypedCellValue(Excel.Range target, Newtonsoft.Json.Linq.JToken token)
+        {
+            if (token == null || token.Type == Newtonsoft.Json.Linq.JTokenType.Null)
+            {
+                target.Value2 = null;
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.String)
+            {
+                target.NumberFormat = "@";
+                target.Value2 = token.ToString();
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+            {
+                target.Value2 = (bool)token;
+                return;
+            }
+
+            if (token.Type == Newtonsoft.Json.Linq.JTokenType.Integer ||
+                token.Type == Newtonsoft.Json.Linq.JTokenType.Float)
+            {
+                double value = Convert.ToDouble(token, System.Globalization.CultureInfo.InvariantCulture);
+                if (double.IsNaN(value) || double.IsInfinity(value))
+                    throw new InvalidOperationException("Numeric cell values must be finite.");
+                target.Value2 = value;
+                return;
+            }
+
+            throw new InvalidOperationException("Unsupported cell value type.");
         }
 
         private static string DescribeFormatting(ToolArguments args)
