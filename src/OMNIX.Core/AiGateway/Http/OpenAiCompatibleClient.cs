@@ -10,6 +10,8 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OMNIX.Core.Errors;
 using OMNIX.Core.Storage;
+using OMNIX.Core.Tools;
+using OMNIX.Core.Logging;
 
 namespace OMNIX.Core.AiGateway.Http
 {
@@ -81,6 +83,100 @@ namespace OMNIX.Core.AiGateway.Http
             }
         }
 
+        private static JObject BuildNativeToolParameters()
+        {
+            var names = new JArray();
+            foreach (string name in ToolNames.AllWhitelisted) names.Add(name);
+            return new JObject
+            {
+                { "type", "object" },
+                { "additionalProperties", false },
+                { "properties", new JObject
+                    {
+                        { "tool", new JObject
+                            {
+                                { "type", "string" },
+                                { "enum", names },
+                                { "description", "Exact OMNIX tool name from the hard whitelist." }
+                            }
+                        },
+                        { "args", new JObject
+                            {
+                                { "type", "object" },
+                                { "additionalProperties", true },
+                                { "description", "Arguments for the selected OMNIX tool." }
+                            }
+                        }
+                    }
+                },
+                { "required", new JArray("tool", "args") }
+            };
+        }
+
+        private static JObject BuildOpenAiNativeTool()
+        {
+            return new JObject
+            {
+                { "type", "function" },
+                { "function", new JObject
+                    {
+                        { "name", "omnix_tool" },
+                        { "description", "Execute exactly one approved OMNIX Office tool. Use one tool call per provider turn." },
+                        { "parameters", BuildNativeToolParameters() }
+                    }
+                }
+            };
+        }
+
+        private static JObject BuildAnthropicNativeTool()
+        {
+            return new JObject
+            {
+                { "name", "omnix_tool" },
+                { "description", "Execute exactly one approved OMNIX Office tool. Use one tool call per provider turn." },
+                { "input_schema", BuildNativeToolParameters() }
+            };
+        }
+
+        private static ProviderToolCall DecodeProviderToolCall(string id, string functionName, string argumentsJson)
+        {
+            string function = (functionName ?? "").Trim();
+            if (string.Equals(function, "omnix_tool", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var root = string.IsNullOrWhiteSpace(argumentsJson) ? new JObject() : JObject.Parse(argumentsJson);
+                    string tool = ToolNames.Normalize((string)root["tool"] ?? "");
+                    JToken args = root["args"];
+                    string argsJson = args == null ? "{}" :
+                        args.Type == JTokenType.String ? (string)args : args.ToString(Formatting.None);
+                    return new ProviderToolCall { Id = id ?? "", Name = tool, ArgumentsJson = string.IsNullOrWhiteSpace(argsJson) ? "{}" : argsJson };
+                }
+                catch
+                {
+                    return new ProviderToolCall { Id = id ?? "", Name = "", ArgumentsJson = "__MALFORMED_NATIVE_TOOL_ARGUMENTS__" };
+                }
+            }
+
+            // Compatibility: some OpenAI-like servers ignore the wrapper schema and emit the
+            // canonical tool name directly. Accept it only if normalization lands on the existing
+            // hard whitelist; the Gateway/ToolExecutor still validates it again.
+            string normalized = ToolNames.Normalize(function);
+            return new ProviderToolCall
+            {
+                Id = id ?? "",
+                Name = normalized,
+                ArgumentsJson = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
+            };
+        }
+
+        private sealed class StreamingToolAccumulator
+        {
+            public string Id;
+            public string Name;
+            public readonly StringBuilder Arguments = new StringBuilder();
+        }
+
         private string _configuredModel;
 
         public void SetModel(string model) { _configuredModel = model; }
@@ -104,6 +200,22 @@ namespace OMNIX.Core.AiGateway.Http
                 { "messages", messages },
                 { "stream", stream }
             };
+
+            if (request.UseNativeTools)
+            {
+                if (_anthropic)
+                {
+                    payload["tools"] = new JArray(BuildAnthropicNativeTool());
+                    payload["tool_choice"] = new JObject { { "type", "auto" } };
+                }
+                else
+                {
+                    payload["tools"] = new JArray(BuildOpenAiNativeTool());
+                    payload["tool_choice"] = "auto";
+                    payload["parallel_tool_calls"] = false;
+                }
+            }
+
             if (_anthropic)
             {
                 payload["max_tokens"] = 4096;
