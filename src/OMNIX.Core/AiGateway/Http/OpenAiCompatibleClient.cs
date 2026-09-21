@@ -261,7 +261,6 @@ namespace OMNIX.Core.AiGateway.Http
                 {
                     payload["tools"] = new JArray(BuildOpenAiNativeTool());
                     payload["tool_choice"] = "auto";
-                    payload["parallel_tool_calls"] = false;
                 }
             }
 
