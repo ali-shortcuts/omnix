@@ -63,6 +63,21 @@ if exist "%LOCALAPPDATA%\OMNIX\logs" (
     ) else (
         echo    ^>^>^> post-install-verify.log NOT FOUND — this OMNIX version predates this check, or install failed before ssPostInstall.
     )
+    echo.
+    echo --- runtime-journey.log (human-readable prompt/provider/tool timeline) ---
+    if exist "%LOCALAPPDATA%\OMNIX\logs\runtime-journey.log" (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath $env:LOCALAPPDATA\OMNIX\logs\runtime-journey.log -Tail 200"
+    ) else (
+        echo    ^>^>^> runtime-journey.log NOT FOUND — run at least one OMNIX request first.
+    )
+    echo.
+    echo --- runtime-events.jsonl (structured machine-readable runtime events) ---
+    if exist "%LOCALAPPDATA%\OMNIX\logs\runtime-events.jsonl" (
+        echo Path: %LOCALAPPDATA%\OMNIX\logs\runtime-events.jsonl
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath $env:LOCALAPPDATA\OMNIX\logs\runtime-events.jsonl -Tail 80"
+    ) else (
+        echo    ^>^>^> runtime-events.jsonl NOT FOUND — run at least one OMNIX request first.
+    )
 ) else (
     echo    ^>^>^> LOGS FOLDER DOES NOT EXIST AT ALL.
 )
