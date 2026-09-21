@@ -49,8 +49,21 @@ namespace OMNIX.Core.Tools
             CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ExecuteOfficeCapability
         };
 
-        public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
-        public static bool IsWriteTool(string name) { return !string.IsNullOrEmpty(name) && WriteTools.Contains(name); }
+        public static string Normalize(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            string value = name.Trim().Replace('-', '_');
+            foreach (string prefix in new[] { "omnix.", "omnix_tool.", "tools.", "functions.", "function." })
+                if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = value.Substring(prefix.Length);
+                    break;
+                }
+            return value.ToLowerInvariant();
+        }
+
+        public static bool IsWhitelisted(string name) { return Whitelist.Contains(Normalize(name)); }
+        public static bool IsWriteTool(string name) { return WriteTools.Contains(Normalize(name)); }
     }
 
     public sealed class ToolCall
@@ -155,7 +168,9 @@ namespace OMNIX.Core.Tools
             if (idx < 0)
             {
                 ToolCall direct = ParseFunctionStyle(reply.Trim());
-                return direct != null && ToolNames.IsWhitelisted(direct.Name) ? direct : null;
+                if (direct == null) return null;
+                direct.Name = ToolNames.Normalize(direct.Name);
+                return ToolNames.IsWhitelisted(direct.Name) ? direct : null;
             }
 
             string body;
@@ -208,7 +223,7 @@ namespace OMNIX.Core.Tools
                 string tool = (string)obj["tool"];
                 if (string.IsNullOrWhiteSpace(tool)) return Invalid("Missing tool name");
                 string args = obj["args"] != null ? obj["args"].ToString(Formatting.None) : "{}";
-                return new ToolCall { Name = tool.Trim(), ArgumentsJson = args };
+                return new ToolCall { Name = ToolNames.Normalize(tool), ArgumentsJson = args };
             }
             catch
             {
@@ -240,7 +255,7 @@ namespace OMNIX.Core.Tools
             try
             {
                 JObject args = ParseNativeArguments(match.Groups[2].Value);
-                return new ToolCall { Name = name, ArgumentsJson = args.ToString(Formatting.None) };
+                return new ToolCall { Name = ToolNames.Normalize(name), ArgumentsJson = args.ToString(Formatting.None) };
             }
             catch
             {
