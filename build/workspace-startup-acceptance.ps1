@@ -96,6 +96,7 @@ class WorkspaceStartupRegression {
         }
     }
     sealed class FakeHost : IHostAdapter, IIndexedHostAdapter, IOfficeAccessHost {
+        public bool AllowWrites; public int Writes;
         public int AccessReads;
         public string ReadOfficeAccess() { AccessReads++; return "documentPresent=true; writeToolsExposed=true; readOnly=false; workbookStructureProtected=false"; }
         public int Reads;
@@ -109,8 +110,43 @@ class WorkspaceStartupRegression {
         public byte[] CaptureChartAsImage(string name) { return null; }
         public byte[] CaptureSlideAsImage(int index) { return null; }
         public byte[] CaptureCurrentViewAsImage() { return null; }
-        public WritePreview PrepareWrite(string name,string json) { throw new NotSupportedException(); }
-        public void ApplyWrite(string name,string json) { throw new NotSupportedException(); }
+        public WritePreview PrepareWrite(string name,string json) { if (!AllowWrites) throw new NotSupportedException(); return new WritePreview { ToolName=name, ArgumentsJson=json, Title="Test", Before="empty", After="sample" }; }
+        public void ApplyWrite(string name,string json) { if (!AllowWrites) throw new NotSupportedException(); Writes++; }
+    }
+    sealed class AccessProvider : IProviderAdapter {
+        public int Calls; public bool CancelScenario;
+        public ProviderInfo Info { get; private set; } = new ProviderInfo { Id="custom", DisplayName="Test", Kind=ProviderKind.Cloud, Vision=VisionSupport.No };
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            string write="```omnix_tool\n{\"tool\":\"create_data_table\",\"args\":{\"sheet\":\"Test\",\"headers\":[\"ID\"],\"rows\":[[1]]}}\n```";
+            string answer = CancelScenario ? (Calls==1 ? write : "Write access is unavailable")
+                : Calls==1 ? "Write access is unavailable" : Calls==2 ? write : "Verified completed";
+            if(delta!=null) delta(answer);
+            return Task.FromResult(new ChatResponse { Text=answer });
+        }
+    }
+    static void AccessRecoveryRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            foreach(bool cancel in new[]{false,true}) {
+                var registry=new ProviderRegistry(); var provider=new AccessProvider { CancelScenario=cancel };
+                var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+                providers.Clear(); providers.Add(provider);
+                var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+                var host=new FakeHost { AllowWrites=true }; int confirmations=0;
+                var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(!cancel); } };
+                var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Create a test table" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+                Check(confirmations==1 && host.Writes==(cancel ? 0 : 1),"Recovery bypassed confirmation or failed to execute approved write");
+                Check(provider.Calls==(cancel ? 2 : 3),"Recovery retried cancelled write or exceeded bounded repair");
+                if(!cancel) Check(result.Text=="Verified completed","Gateway did not return corrected final answer");
+            }
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
     static void CapabilityRegression() {
         var host=new FakeHost(); var executor=new ToolExecutor();
@@ -279,6 +315,7 @@ class WorkspaceStartupRegression {
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();
+            AccessRecoveryRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");
