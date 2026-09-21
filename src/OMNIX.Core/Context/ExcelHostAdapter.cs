@@ -123,16 +123,22 @@ namespace OMNIX.Core.Context
             if (wb == null) throw new InvalidOperationException("No workbook is open.");
             int total = wb.Worksheets.Count;
             var sb = new StringBuilder();
-            sb.AppendLine("Workbook: " + wb.Name + "; worksheets=" + total + "; offset=" + offset);
+            int workbookNames = 0;
+            try { workbookNames = wb.Names.Count; } catch { }
+            sb.AppendLine("Workbook: " + wb.Name + "; worksheets=" + total + "; workbookNames=" + workbookNames + "; offset=" + offset);
             int end = Math.Min(total, offset + 20);
             for (int i = offset + 1; i <= end; i++)
             {
                 var ws = (Excel.Worksheet)wb.Worksheets[i];
+                int chartCount = 0, shapeCount = 0;
+                try { chartCount = ((Excel.ChartObjects)ws.ChartObjects()).Count; } catch { }
+                try { shapeCount = ws.Shapes.Count; } catch { }
                 sb.AppendLine("Sheet=" + ws.Name + "; used=" + ws.UsedRange.Address[false, false]
-                    + "; visibility=" + ws.Visible + "; tables=" + ws.ListObjects.Count);
+                    + "; visibility=" + ws.Visible + "; tables=" + ws.ListObjects.Count
+                    + "; charts=" + chartCount + "; shapes=" + shapeCount);
             }
             sb.AppendLine("nextOffset=" + (end < total ? end.ToString() : "none"));
-            sb.AppendLine("Map only: no cell contents read. Charts, VBA, connections and external files are not enumerated.");
+            sb.AppendLine("Map only: no cell contents read. Table/chart/shape counts come directly from the workbook object model. VBA, connections and external-file contents are not executed or imported.");
             return sb.ToString();
         }
 
@@ -151,8 +157,8 @@ namespace OMNIX.Core.Context
                 throw new ArgumentException("Request at most 256 cells inside worksheet boundaries.");
             // Resize BEFORE asking COM for arrays. No selection or active-sheet mutation.
             var range = ((Excel.Range)ws.Cells[row, col]).Resize[rows, cols];
-            object values = range.Value2, formulas = range.Formula;
-            var va = values as Array; var fa = formulas as Array;
+            object values = range.Value2, formulas = range.Formula, formats = range.NumberFormat;
+            var va = values as Array; var fa = formulas as Array; var nfa = formats as Array;
             var sb = new StringBuilder();
             sb.AppendLine("Sheet=" + ws.Name + "; requested=" + range.Address[false, false]);
             int shown = 0;
@@ -162,9 +168,11 @@ namespace OMNIX.Core.Context
                 {
                     string v = Convert.ToString(va == null ? values : va.GetValue(y, x));
                     string f = Convert.ToString(fa == null ? formulas : fa.GetValue(y, x));
+                    string nf = Convert.ToString(nfa == null ? formats : nfa.GetValue(y, x));
                     string cell = "row=" + (row+y-1) + ",column=" + (col+x-1)
                         + "; value=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(v, 600))
-                        + "; formula=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(f, 600));
+                        + "; formula=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(f, 600))
+                        + "; numberFormat=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(nf, 120));
                     if (sb.Length + cell.Length > 5500)
                     {
                         sb.AppendLine("PARTIAL: next unread row=" + (row+y-1) + ",column=" + (col+x-1) + "; request a smaller region.");

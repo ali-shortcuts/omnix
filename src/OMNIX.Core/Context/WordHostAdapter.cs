@@ -112,23 +112,122 @@ namespace OMNIX.Core.Context
         public string ReadDocumentMap(int offset)
         {
             var doc = _app.ActiveDocument;
-            var body = doc.Content;
-            return "Word main story: start=" + body.Start + "; endExclusive=" + body.End
-                + "; paragraphs=" + doc.Paragraphs.Count + "; tables=" + doc.Tables.Count
+            if (doc == null) throw new InvalidOperationException("No Word document is open.");
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Word document: " + doc.Name
+                + "; paragraphs=" + doc.Paragraphs.Count
+                + "; tables=" + doc.Tables.Count
                 + "; comments=" + doc.Comments.Count
-                + ". Read using start/count. Headers, footers, text boxes, comments and footnotes are NOT included in main-story text.";
+                + "; fields=" + doc.Fields.Count
+                + "; inlineShapes=" + doc.InlineShapes.Count
+                + "; floatingShapes=" + doc.Shapes.Count);
+
+            AppendStoryMap(sb, doc, "main", Word.WdStoryType.wdMainTextStory);
+            AppendStoryMap(sb, doc, "footnotes", Word.WdStoryType.wdFootnotesStory);
+            AppendStoryMap(sb, doc, "endnotes", Word.WdStoryType.wdEndnotesStory);
+            AppendStoryMap(sb, doc, "comments", Word.WdStoryType.wdCommentsStory);
+            AppendStoryMap(sb, doc, "textframes", Word.WdStoryType.wdTextFrameStory);
+            AppendStoryMap(sb, doc, "primaryheader", Word.WdStoryType.wdPrimaryHeaderStory);
+            AppendStoryMap(sb, doc, "primaryfooter", Word.WdStoryType.wdPrimaryFooterStory);
+            AppendStoryMap(sb, doc, "firstpageheader", Word.WdStoryType.wdFirstPageHeaderStory);
+            AppendStoryMap(sb, doc, "firstpagefooter", Word.WdStoryType.wdFirstPageFooterStory);
+            AppendStoryMap(sb, doc, "evenheader", Word.WdStoryType.wdEvenPagesHeaderStory);
+            AppendStoryMap(sb, doc, "evenfooter", Word.WdStoryType.wdEvenPagesFooterStory);
+            sb.AppendLine("Read a listed story with read_document_section {story,start,count}. This is direct Word object-model text, not a screenshot.");
+            return sb.ToString();
         }
 
         public string ReadDocumentSection(ToolArguments args)
         {
             var doc = _app.ActiveDocument;
-            var body = doc.Content;
-            int start = args.Integer("start", body.Start, body.Start, body.End);
+            if (doc == null) throw new InvalidOperationException("No Word document is open.");
+
+            string storyName = args.Get("story", "main");
+            Word.Range story = ResolveStoryRange(doc, storyName);
+            int start = args.Integer("start", story.Start, story.Start, story.End);
             int count = args.Integer("count", 4000, 1, 4000);
-            int end = Math.Min(body.End, start + count);
-            string text = doc.Range(start, end).Text;
-            return "Word main story [" + start + "," + end + "); nextStart="
-                + (end < body.End ? end.ToString() : "none") + "\n" + text;
+            int end = Math.Min(story.End, start + count);
+
+            Word.Range part = null;
+            try
+            {
+                part = story.Duplicate;
+                part.Start = start;
+                part.End = end;
+                string text = part.Text ?? "";
+                return "Word story=" + NormalizeStoryName(storyName) + " [" + start + "," + end + "); nextStart="
+                    + (end < story.End ? end.ToString() : "none") + "\n" + text;
+            }
+            finally
+            {
+                if (part != null)
+                {
+                    try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(part); } catch { }
+                }
+            }
+        }
+
+        private static void AppendStoryMap(StringBuilder sb, Word.Document doc, string name, Word.WdStoryType type)
+        {
+            try
+            {
+                Word.Range range = doc.StoryRanges[type];
+                if (range == null) return;
+                int segments = 0;
+                Word.Range cursor = range;
+                while (cursor != null && segments < 64)
+                {
+                    segments++;
+                    Word.Range next = null;
+                    try { next = cursor.NextStoryRange; } catch { }
+                    cursor = next;
+                }
+                sb.AppendLine("story=" + name + "; start=" + range.Start + "; endExclusive=" + range.End + "; segments=" + segments);
+            }
+            catch
+            {
+                // Story is absent in this document.
+            }
+        }
+
+        private static Word.Range ResolveStoryRange(Word.Document doc, string storyName)
+        {
+            Word.WdStoryType type = StoryType(storyName);
+            try
+            {
+                Word.Range range = doc.StoryRanges[type];
+                if (range == null) throw new InvalidOperationException("Requested Word story is not present.");
+                return range;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Word story '" + NormalizeStoryName(storyName) + "' is not present in this document.", ex);
+            }
+        }
+
+        private static Word.WdStoryType StoryType(string storyName)
+        {
+            switch (NormalizeStoryName(storyName))
+            {
+                case "main": return Word.WdStoryType.wdMainTextStory;
+                case "footnotes": return Word.WdStoryType.wdFootnotesStory;
+                case "endnotes": return Word.WdStoryType.wdEndnotesStory;
+                case "comments": return Word.WdStoryType.wdCommentsStory;
+                case "textframes": return Word.WdStoryType.wdTextFrameStory;
+                case "primaryheader": return Word.WdStoryType.wdPrimaryHeaderStory;
+                case "primaryfooter": return Word.WdStoryType.wdPrimaryFooterStory;
+                case "firstpageheader": return Word.WdStoryType.wdFirstPageHeaderStory;
+                case "firstpagefooter": return Word.WdStoryType.wdFirstPageFooterStory;
+                case "evenheader": return Word.WdStoryType.wdEvenPagesHeaderStory;
+                case "evenfooter": return Word.WdStoryType.wdEvenPagesFooterStory;
+                default: throw new ArgumentException("Unknown Word story. Use a story name returned by read_document_map.");
+            }
+        }
+
+        private static string NormalizeStoryName(string storyName)
+        {
+            return (storyName ?? "main").Trim().Replace("_", "").Replace("-", "").ToLowerInvariant();
         }
 
         public byte[] CaptureChartAsImage(string chartName) { return null; }

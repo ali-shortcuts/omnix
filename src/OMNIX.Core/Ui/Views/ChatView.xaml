@@ -82,6 +82,22 @@
             </Grid>
         </Border>
 
+        <!-- Live activity: real request/tool lifecycle, never simulated ribbon clicks -->
+        <Border x:Name="ActivityBorder" DockPanel.Dock="Bottom" Visibility="Collapsed"
+                Background="{DynamicResource B.Surface}" BorderBrush="{DynamicResource B.Border}"
+                BorderThickness="0,1,0,0" Padding="8,5">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Live activity" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{DynamicResource B.ForegroundDim}" Margin="0,0,0,3" />
+                <ScrollViewer x:Name="ActivityScroll" MaxHeight="96" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="ActivityText" FontSize="10.5" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="OMNIX.ActivityText"
+                               AutomationProperties.Name="OMNIX live activity"
+                               Foreground="{DynamicResource B.Foreground}" />
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
         <!-- Pending image strip -->
         <Border x:Name="PendingImageBorder" DockPanel.Dock="Bottom" Visibility="Collapsed"
                 BorderBrush="{DynamicResource B.Border}" BorderThickness="0,1,0,0"

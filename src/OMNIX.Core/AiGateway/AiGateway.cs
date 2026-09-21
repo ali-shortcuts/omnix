@@ -25,6 +25,7 @@ namespace OMNIX.Core.AiGateway
     /// </summary>
     public sealed class AiGateway
     {
+        private const int MaxProviderToolRounds = 24;
         private readonly ProviderRegistry _registry;
         private readonly ProviderHealthTracker _health;
         private readonly ProviderRouter _router;
@@ -75,7 +76,7 @@ namespace OMNIX.Core.AiGateway
 
             var approvedProviders = new HashSet<string>(StringComparer.Ordinal);
             ChatResponse final = null;
-            for (int round = 0; round < 8; round++)
+            for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 var req = new ChatRequest
                 {
@@ -198,7 +199,7 @@ namespace OMNIX.Core.AiGateway
             if (final == null)
                 final = new ChatResponse { Text = string.Empty };
             // Never return the last internal tool call as if it were a completed user answer.
-            return new ChatResponse { Text = "OMNIX reached the eight-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
+            return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
         }
 
         private bool ShouldSuggestAlternative(OmnixException ex)
@@ -330,7 +331,14 @@ namespace OMNIX.Core.AiGateway
     /// </summary>
     internal sealed class ToolProtocolDeltaFilter
     {
-        private const string Marker = "```omnix_tool";
+        private static readonly string[] Markers =
+        {
+            "```omnix_tool",
+            "<tool_call>",
+            "<|tool_call_start|>"
+        };
+        private static readonly int Holdback = Markers.Max(m => m.Length) - 1;
+
         private readonly Action<string> _sink;
         private readonly StringBuilder _pending = new StringBuilder();
         private bool _suppress;
@@ -349,9 +357,7 @@ namespace OMNIX.Core.AiGateway
 
             _pending.Append(delta);
             string text = _pending.ToString();
-            int markerIndex = text.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
-            int xmlIndex = text.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase);
-            if (xmlIndex >= 0 && (markerIndex < 0 || xmlIndex < markerIndex)) markerIndex = xmlIndex;
+            int markerIndex = FirstMarkerIndex(text);
             if (markerIndex >= 0)
             {
                 Emit(text.Substring(0, markerIndex));
@@ -360,8 +366,9 @@ namespace OMNIX.Core.AiGateway
                 return;
             }
 
-            // Hold only Marker.Length-1 chars, enough to catch a marker split across HTTP chunks.
-            int safeLength = _pending.Length - (Marker.Length - 1);
+            // Hold enough trailing characters to detect any supported marker split across
+            // HTTP/SSE chunks. This includes provider-native <|tool_call_start|> tokens.
+            int safeLength = _pending.Length - Holdback;
             if (safeLength > 0)
             {
                 string safe = _pending.ToString(0, safeLength);
@@ -393,6 +400,17 @@ namespace OMNIX.Core.AiGateway
             _pending.Clear();
         }
 
+        private static int FirstMarkerIndex(string text)
+        {
+            int best = -1;
+            foreach (string marker in Markers)
+            {
+                int idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+            }
+            return best;
+        }
+
         private void Emit(string text)
         {
             if (_sink != null && !string.IsNullOrEmpty(text)) _sink(text);
@@ -413,7 +431,7 @@ namespace OMNIX.Core.AiGateway
             if (hostAdapter != null) sb.AppendLine("ACTIVE OFFICE HOST: " + hostAdapter.HostDisplayName + ". You operate only on this workspace's current document, not other applications or arbitrary files.");
             sb.AppendLine("Work method: inspect relevant structure, state the plan and assumptions, request approval for each concrete write, then read back the affected area to check the result. Never claim that a tool or test succeeded without its result.");
             sb.AppendLine("For a business system: clarify business rules, identifiers, relationships, units/currency, validation, totals, and reporting requirements. Never invent live business data. A formatted spreadsheet is not automatically a relational database or a tested accounting system.");
-            sb.AppendLine("There are at most eight provider turns per request. Scope large jobs into explicit stages and report unfinished work. Model support for image input is required for Vision; a text-only connection test does not verify Vision.");
+            sb.AppendLine("There are at most 24 provider/tool turns per request. Complete ordinary multi-sheet jobs within that bounded loop when possible; scope genuinely large jobs into explicit stages and report unfinished work. Model support for image input is required for pixel-level Vision; structured Office inspection does not require image input.");
             sb.AppendLine("You help the user with THEIR document: answering questions, drafting text, writing Excel formulas, summarizing data, and reviewing slides.");
             sb.AppendLine("Use structured Office context first. Never claim you inspected an entire workbook/document/presentation unless the supplied context or a read tool actually contains the relevant scope.");
             sb.AppendLine("Keep previews short: describe the intended change and show sample data. Do not expose tool names, protocol, internal limits or token counts. Ask only for missing decisions that materially change the result; propose sensible defaults for a small demonstration. Count rows and cells accurately. Do not claim a change is irreversible unless the tool explicitly says so.");
@@ -433,16 +451,16 @@ namespace OMNIX.Core.AiGateway
                 if (hostAdapter.Host == HostType.Excel)
                     sb.AppendLine("Excel read_document_section {sheet,row:1,column:1,rows:10,columns:8}: up to 256 cells, rows <=100 and columns <=32, one-based coordinates. Returns values and formulas, with partial coverage explicitly marked. Never treat a partial read as the whole sheet.");
                 else if (hostAdapter.Host == HostType.Word)
-                    sb.AppendLine("Word read_document_section {start:0,count:4000}: main-story character offsets, zero-based. Follow nextStart. Headers, footers, comments and text boxes are not included; disclose that limitation.");
+                    sb.AppendLine("Word read_document_map lists available object-model stories including main text, headers/footers, comments, footnotes/endnotes and text frames when present. Read them with read_document_section {story:'main',start:0,count:4000}; follow nextStart. This is direct Word structure, not a screenshot.");
                 else
-                    sb.AppendLine("PowerPoint read_document_section {slide:1,shape:1,start:0,count:3000}: one-based slide/shape and zero-based text offset. Enumerate shapes from the map and use slide images for non-text objects. Notes and nested groups are not included in this text tool.");
+                    sb.AppendLine("PowerPoint read_document_map reports text/table/group/picture/chart counts per slide. Use read_document_section {slide:1,shape:1,start:0,count:3000} for shape text/table/group metadata, or {slide:1,part:'notes',start:0,count:3000} for speaker notes. Pixel-level appearance still requires slide capture.");
             }
             sb.AppendLine("For a broader textual/structural question, request read_document (or read_presentation in PowerPoint) instead of guessing from the initial compact context.");
             sb.AppendLine("For visual inspection, request capture_current_view_as_image for the current Excel/Word/PowerPoint view/selection, capture_chart_as_image for an Excel chart, or capture_slide_as_image for a PowerPoint slide. OMNIX attaches the captured PNG to the next tool-result turn automatically when the active model supports Vision.");
             sb.AppendLine("A visual capture is bounded: analyze only what is visible in that captured image and do not claim to see other pages, sheets, cells or slides.");
             sb.AppendLine("Write tools always require a user preview and confirmation. Available only in the active host:");
             if (hostAdapter != null && hostAdapter.Host == HostType.Excel)
-                sb.AppendLine("Excel: write_to_cell {sheet,address,value}, insert_formula {sheet,address,formula}, highlight_range {sheet,address} (sheet optional; defaults to active worksheet); capture_chart_as_image {chart} for reading a chart. create_data_table {sheet,headers:[text],rows:[[value,...]]} creates ONE NEW sheet/table: 1–24 unique headers, 0–50 rows, <=512 cells including headers, <=32000 argument characters, each cell <=500 characters. Never overwrites sheets; strings remain literal data, not formulas. New sheets cannot be assumed undoable with Ctrl+Z; delete the new sheet to reverse. Empty rows creates one blank input row. This does not implement relationships, foreign keys or database transactions.");
+                sb.AppendLine("Excel: write_to_cell {sheet,address,value}, insert_formula {sheet,address,formula}, highlight_range {sheet,address} (sheet optional; defaults to active worksheet); capture_chart_as_image {chart} for reading a chart. For multi-cell construction prefer create_data_table {sheet,uniqueName:true,headers:[text],rows:[[cell,...]]}. It creates ONE NEW styled sheet/table, auto-fits columns, and verifies written cells. Cell values may be text/number/boolean/null, or typed objects {formula:\"=D2*F2\",numberFormat:\"#,##0\"} and {date:\"2026-09-21\",numberFormat:\"yyyy-mm-dd\"}. Primitive strings always remain literal text. With uniqueName=true, an existing requested sheet is preserved and OMNIX resolves a fresh suffix such as ' (2)' before the approval preview. Limits remain 1–24 headers, 0–50 rows, <=512 cells and <=32000 argument characters. New sheets cannot be assumed undoable with Ctrl+Z; delete the new sheet to reverse. For multi-sheet systems: inspect read_document_map first, create one sheet at a time, then read_document_section to verify values/formulas before proceeding. This does not implement relational database transactions.");
             else if (hostAdapter != null && hostAdapter.Host == HostType.Word)
                 sb.AppendLine("Word: rewrite_selected_text {text}.");
             else if (hostAdapter != null)

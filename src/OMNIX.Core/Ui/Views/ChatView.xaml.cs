@@ -20,6 +20,7 @@ namespace OMNIX.Core.Ui
         private WorkspaceController _controller;
         private ImageAttachment _pendingImage;
         private bool _busy;
+        private readonly Queue<string> _activityLines = new Queue<string>();
 
         public ChatView()
         {
@@ -74,6 +75,44 @@ namespace OMNIX.Core.Ui
         public void SetContextText(string text)
         {
             ContextText.Text = text ?? "—";
+        }
+
+
+        public void BeginActivity(string message)
+        {
+            _activityLines.Clear();
+            ActivityText.Text = "";
+            ActivityBorder.Visibility = Visibility.Visible;
+            AddActivity(message);
+        }
+
+        public void AddActivity(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return;
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => AddActivity(message)));
+                return;
+            }
+
+            _activityLines.Enqueue(DateTime.Now.ToString("HH:mm:ss") + "  " + message.Trim());
+            while (_activityLines.Count > 24) _activityLines.Dequeue();
+            ActivityText.Text = string.Join(Environment.NewLine, _activityLines);
+            ActivityBorder.Visibility = Visibility.Visible;
+            ActivityScroll.UpdateLayout();
+            ActivityScroll.ScrollToEnd();
+        }
+
+        public void EndActivity(string message)
+        {
+            AddActivity(message);
+        }
+
+        public void ClearActivity()
+        {
+            _activityLines.Clear();
+            ActivityText.Text = "";
+            ActivityBorder.Visibility = Visibility.Collapsed;
         }
 
         public void SetStatus(string message)
@@ -144,6 +183,7 @@ namespace OMNIX.Core.Ui
 
         private void OnNewChat(object sender, RoutedEventArgs e)
         {
+            ClearActivity();
             if (_controller != null) _controller.NewChat();
         }
 
@@ -185,6 +225,7 @@ namespace OMNIX.Core.Ui
 
         private void OnClear(object sender, RoutedEventArgs e)
         {
+            ClearActivity();
             if (_controller != null) _controller.ClearChat();
         }
 

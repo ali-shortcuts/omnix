@@ -118,6 +118,10 @@ class WorkspaceStartupRegression {
         Check(!executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==2,"Invalid offset crossed host boundary");
         string valid="{\"sheet\":\"Products\",\"headers\":[\"ID\",\"Price\"],\"rows\":[[\"001\",12.5]]}";
         Check(ExcelTableBuilder.ValidatePlan(valid)!=null,"Valid table rejected");
+        string typed="{\"sheet\":\"Report\",\"uniqueName\":true,\"headers\":[\"Formula\",\"Date\"],\"rows\":[[{\"formula\":\"=1+1\",\"numberFormat\":\"0\"},{\"date\":\"2026-09-21\"}]]}";
+        Check(ExcelTableBuilder.ValidatePlan(typed)!=null,"Typed formula/date table rejected");
+        bool badTypedRejected=false; try { ExcelTableBuilder.ValidatePlan(typed.Replace("=1+1","1+1")); } catch { badTypedRejected=true; }
+        Check(badTypedRejected,"Non-formula typed cell accepted");
         foreach(string invalid in new[]{valid.Replace("Products","Bad/Name"),valid.Replace("Price","ID"),valid.Replace("12.5]","12.5,4]"),"{}",new string('x',32001)}) {
             bool rejected=false; try { ExcelTableBuilder.ValidatePlan(invalid); } catch { rejected=true; }
             Check(rejected,"Invalid table plan accepted");
@@ -217,11 +221,15 @@ class WorkspaceStartupRegression {
             var xmlCall = OMNIX.Core.Tools.ToolCallParser.Parse("Checking...<tool_call>omnix_tool\n{\"tool\":\"read_document_section\",\"args\":{\"sheet\":\"test\"}}</tool_call>");
             Check(xmlCall != null && xmlCall.Name == "read_document_section", "XML tool call not parsed");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("```omnix_tool {\"tool\":\"read_selection\"}```").Name == "read_selection", "Inline fenced call not parsed");
+            var nativeCall = OMNIX.Core.Tools.ToolCallParser.Parse("<|tool_call_start|>[write_to_cell(sheet='Sheet1', address='B2', value='کد محصول')]<|tool_call_end|>");
+            Check(nativeCall != null && nativeCall.Name == "write_to_cell" && nativeCall.ArgumentsJson.Contains("کد محصول"), "Provider-native tool call not parsed");
+            var nativeTable = OMNIX.Core.Tools.ToolCallParser.Parse("<|tool_call_start|>[create_data_table(sheet='محصولات', uniqueName=True, headers=['کد','وزن'], rows=[['T001',3]])]<|tool_call_end|>");
+            Check(nativeTable != null && nativeTable.Name == "create_data_table" && nativeTable.ArgumentsJson.Contains("\"uniqueName\":true"), "Nested native table arguments not parsed");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>broken").Name == "", "Incomplete call must fail closed");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("plain answer") == null, "Plain answer treated as a tool");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>{\"tool\":\"read_selection\"}</tool_call><tool_call>{}</tool_call>").Name == "", "Ambiguous calls accepted");
             var filterType = typeof(OMNIX.Core.Tools.ToolCallParser).Assembly.GetType("OMNIX.Core.AiGateway.ToolProtocolDeltaFilter", true);
-            foreach (string protocol in new[] { "<tool_call>omnix_tool\n{}\n</tool_call>", "```omnix_tool\n{}\n```" })
+            foreach (string protocol in new[] { "<tool_call>omnix_tool\n{}\n</tool_call>", "```omnix_tool\n{}\n```", "<|tool_call_start|>[read_selection()]<|tool_call_end|>" })
             {
                 var visible = new System.Text.StringBuilder();
                 var filter = Activator.CreateInstance(filterType, new object[] { new Action<string>(part => visible.Append(part)) });
@@ -231,6 +239,9 @@ class WorkspaceStartupRegression {
                 Check(visible.ToString() == "Visible prefix ", "Split tool protocol leaked into chat");
             }
             Check(OMNIX.Core.Reference.OfficeReference.Search("Excel", "DSUM").Contains("functions/dsum-function"), "Reference catalog missing DSUM");
+            string faReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "fa");
+            string enReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "en");
+            Check(!string.IsNullOrWhiteSpace(faReference) && faReference != enReference && faReference.Contains("Excel") && faReference.Contains("Microsoft"), "Persian reference mode missing");
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();

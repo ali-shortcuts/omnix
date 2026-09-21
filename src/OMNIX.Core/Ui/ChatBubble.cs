@@ -121,12 +121,24 @@ namespace OMNIX.Core.Ui
                 SetImage(turn.Images[0].PngBytes);
 
             _rawText = turn.Text ?? "";
-            Loaded += (sender, args) => { AppendMarkdown(_rawText); Theming.ThemeManager.Instance.ThemeChanged += RefreshTheme; };
+            Loaded += (sender, args) =>
+            {
+                ApplyResolvedThemeResources();
+                AppendMarkdown(_rawText);
+                Theming.ThemeManager.Instance.ThemeChanged += RefreshTheme;
+            };
             Unloaded += (sender, args) => Theming.ThemeManager.Instance.ThemeChanged -= RefreshTheme;
-            AppendMarkdown(_rawText);
         }
 
-        private void RefreshTheme() { Dispatcher.BeginInvoke(new Action(() => AppendMarkdown(_rawText))); }
+        private void RefreshTheme()
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!IsLoaded) return;
+                ApplyResolvedThemeResources();
+                AppendMarkdown(_rawText);
+            }));
+        }
 
         public void SetImage(byte[] png)
         {
@@ -152,6 +164,7 @@ namespace OMNIX.Core.Ui
         public void AppendText(string chunk)
         {
             _rawText += chunk ?? "";
+            if (!IsLoaded) return;
             AppendMarkdown(_rawText);
             ScrollToEndSafe();
         }
@@ -159,15 +172,50 @@ namespace OMNIX.Core.Ui
         public void ReplaceText(string fullText)
         {
             _rawText = fullText ?? "";
+            if (!IsLoaded) return;
             AppendMarkdown(_rawText);
             ScrollToEndSafe();
         }
 
         private void AppendMarkdown(string text)
         {
+            ApplyResolvedThemeResources();
             _doc.FlowDirection = System.Text.RegularExpressions.Regex.IsMatch(text ?? "", @"^[^A-Za-z\u0600-\u06ff]*[\u0600-\u06ff]")
                 ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
             MarkdownRenderer.Render(_doc, text);
+        }
+
+        /// <summary>
+        /// FlowDocument resource lookup can be unreliable in VSTO because Office does not always
+        /// create a normal WPF Application resource tree. Copy the brushes resolved from the actual
+        /// task-pane element into the document itself before every render. This prevents the
+        /// RichTextBox/Markdown defaults from silently falling back to black text in dark mode.
+        /// </summary>
+        private void ApplyResolvedThemeResources()
+        {
+            string[] keys =
+            {
+                "B.Foreground", "B.ForegroundDim", "B.Border", "B.Accent", "B.Link",
+                "B.CodeBackground", "B.CodeKeyword", "B.CodeString", "B.CodeComment",
+                "B.CodeNumber", "B.BubbleUserForeground", "B.BubbleAiForeground"
+            };
+            foreach (string key in keys)
+            {
+                object resolved = null;
+                try { resolved = TryFindResource(key); } catch { }
+                if (resolved is Brush) _doc.Resources[key] = resolved;
+            }
+
+            Brush fallback = IsUser ? Brushes.White : Brushes.Gainsboro;
+            string foregroundKey = IsUser ? "B.BubbleUserForeground" : "B.BubbleAiForeground";
+            Brush foreground = null;
+            try { foreground = TryFindResource(foregroundKey) as Brush; } catch { }
+            if (foreground == null && _doc.Resources.Contains(foregroundKey))
+                foreground = _doc.Resources[foregroundKey] as Brush;
+            if (foreground == null) foreground = fallback;
+
+            _doc.Foreground = foreground;
+            _body.Foreground = foreground;
         }
 
         private void ScrollToEndSafe()
