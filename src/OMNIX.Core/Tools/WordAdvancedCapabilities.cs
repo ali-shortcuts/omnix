@@ -122,13 +122,13 @@ namespace OMNIX.Core.Tools
         private static string SelectionInspect(Word.Application app)
         {
             var s=app.Selection;if(s==null)return "(no selection)"; string style="";try{style=Convert.ToString(s.get_Style());}catch{}
-            int table=0;try{table=s.Information[Word.WdInformation.wdWithInTable]?1:0;}catch{}
+            int table=0;try{table=Convert.ToBoolean(s.Information[Word.WdInformation.wdWithInTable])?1:0;}catch{}
             return "selection=["+s.Start+","+s.End+"); text="+Q(TextUtil.Truncate(s.Text??"",3000))+"; style="+Q(style)+
                    "; alignment="+s.ParagraphFormat.Alignment+"; inTable="+table+"; font="+s.Font.Name+" "+s.Font.Size;
         }
         private static string ParagraphInspect(Word.Document d,ToolArguments a)
         {
-            int i=Int(a,"index",1,d.Paragraphs.Count);var p=d.Paragraphs[i];string style="";try{style=Convert.ToString(p.get_Style());}catch{}
+            int i=Int(a,"index",1,d.Paragraphs.Count);var p=d.Paragraphs[i];string style="";try{style=Convert.ToString(p.Range.get_Style());}catch{}
             return "paragraph="+i+"; range=["+p.Range.Start+","+p.Range.End+"); style="+Q(style)+"; alignment="+p.Alignment+
                    "; text="+Q(TextUtil.Truncate(p.Range.Text??"",4000));
         }
@@ -195,9 +195,9 @@ namespace OMNIX.Core.Tools
             var f=app.Selection.Font;string n=a.Get("fontName","");if(n.Length>0)f.Name=n;if(a.Token("fontSize")!=null)f.Size=(float)Double(a,"fontSize",6,96,11);if(a.Token("bold")!=null)f.Bold=Bool(a,"bold",false)?1:0;if(a.Token("italic")!=null)f.Italic=Bool(a,"italic",false)?1:0;if(a.Token("underline")!=null)f.Underline=Bool(a,"underline",false)?Word.WdUnderline.wdUnderlineSingle:Word.WdUnderline.wdUnderlineNone;string color=a.Get("fontColor","");if(color.Length>0)f.Color=(Word.WdColor)Ole(color);
         }
         private static void StyleApply(Word.Application app,ToolArguments a){object style=a.Get("style","");app.Selection.set_Style(ref style);}
-        private static void TableCreate(Word.Application app,Word.Document d,ToolArguments a){var t=d.Tables.Add(app.Selection.Range,Int(a,"rows",1,100),Int(a,"columns",1,30));string style=a.Get("style","");if(style.Length>0)t.Style=style;t.Select();}
-        private static void TableAddRow(Word.Document d,ToolArguments a){var t=Table(d,a);string p=a.Get("position","end");if(p.Equals("end",StringComparison.OrdinalIgnoreCase))t.Rows.Add();else{int idx=Int(a,"position",1,t.Rows.Count);object before=t.Rows[idx];t.Rows.Add(ref before);}}
-        private static void TableStyle(Word.Document d,ToolArguments a){var t=Table(d,a);string s=a.Get("style","");if(s.Length>0)t.Style=s;string fit=a.Get("autofit","").ToLowerInvariant();if(fit=="content")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitContent);else if(fit=="window")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitWindow);else if(fit=="fixed")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitFixed);}
+        private static void TableCreate(Word.Application app,Word.Document d,ToolArguments a){var t=d.Tables.Add(app.Selection.Range,Int(a,"rows",1,100),Int(a,"columns",1,30));string style=a.Get("style","");if(style.Length>0){object tableStyle=style;t.set_Style(ref tableStyle);}t.Select();}
+        private static void TableAddRow(Word.Document d,ToolArguments a){var t=Table(d,a);string p=a.Get("position","end");if(p.Equals("end",StringComparison.OrdinalIgnoreCase))t.Rows.Add();else{int idx=Int(a,"position",1,t.Rows.Count);Word.Row before=t.Rows[idx];t.Rows.Add(ref before);}}
+        private static void TableStyle(Word.Document d,ToolArguments a){var t=Table(d,a);string s=a.Get("style","");if(s.Length>0){object tableStyle=s;t.set_Style(ref tableStyle);}string fit=a.Get("autofit","").ToLowerInvariant();if(fit=="content")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitContent);else if(fit=="window")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitWindow);else if(fit=="fixed")t.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitFixed);}
         private static void BookmarkAdd(Word.Application app,Word.Document d,ToolArguments a){string n=a.Get("name","");if(d.Bookmarks.Exists(n))d.Bookmarks[n].Delete();d.Bookmarks.Add(n,app.Selection.Range);}
         private static void CommentAdd(Word.Application app,Word.Document d,ToolArguments a){object text=a.Get("text","");d.Comments.Add(app.Selection.Range,ref text);}
         private static void Revisions(Word.Document d,Word.Application app,ToolArguments a,bool accept){string scope=a.Get("scope","selection").ToLowerInvariant();if(scope=="document"){if(accept)d.Revisions.AcceptAll();else d.Revisions.RejectAll();}else{var r=app.Selection.Range;if(accept)r.Revisions.AcceptAll();else r.Revisions.RejectAll();}}
