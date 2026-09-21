@@ -286,9 +286,24 @@ namespace OMNIX.Core.Tools
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Apply);
             long applyTimer = RuntimeDiagnosticJournal.StartTimer();
             RuntimeDiagnosticJournal.Event("write_apply_start", call.Name, "start", null, null, null);
-            adapter.ApplyWrite(call.Name, applyArguments);
-            RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "success",
-                RuntimeDiagnosticJournal.ElapsedMs(applyTimer), null, null);
+            try
+            {
+                adapter.ApplyWrite(call.Name, applyArguments);
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "success",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), null, null);
+            }
+            catch (OmnixException ex)
+            {
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "omnix_error",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), ex.Code, null);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                RuntimeDiagnosticJournal.Event("write_apply_end", call.Name, "exception",
+                    RuntimeDiagnosticJournal.ElapsedMs(applyTimer), null, "type=" + ex.GetType().Name);
+                throw;
+            }
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Verify);
             string hint = call.Name == ToolNames.CreateDataTable
                 ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
