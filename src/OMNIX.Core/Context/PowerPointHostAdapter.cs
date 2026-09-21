@@ -122,36 +122,131 @@ namespace OMNIX.Core.Context
         public string ReadDocumentMap(int offset)
         {
             var pres = _app.ActivePresentation;
+            if (pres == null) throw new InvalidOperationException("No PowerPoint presentation is open.");
             int total = pres.Slides.Count, end = Math.Min(total, offset + 20);
             var sb = new StringBuilder();
             sb.AppendLine("Slides=" + total + "; offset=" + offset);
             for (int i = offset + 1; i <= end; i++)
             {
                 var slide = pres.Slides[i];
+                int textShapes = 0, tables = 0, groups = 0, pictures = 0, charts = 0;
+                foreach (Ppt.Shape shape in slide.Shapes)
+                {
+                    try
+                    {
+                        if (shape.HasTextFrame == Office.MsoTriState.msoTrue &&
+                            shape.TextFrame.HasText == Office.MsoTriState.msoTrue) textShapes++;
+                        if (shape.HasTable == Office.MsoTriState.msoTrue) tables++;
+                        if (shape.Type == Office.MsoShapeType.msoGroup) groups++;
+                        if (shape.Type == Office.MsoShapeType.msoPicture ||
+                            shape.Type == Office.MsoShapeType.msoLinkedPicture) pictures++;
+                        if (shape.Type == Office.MsoShapeType.msoChart) charts++;
+                    }
+                    catch { }
+                }
+                string notes = GetNotes(slide, 220);
                 sb.AppendLine("slide=" + i + "; shapes=" + slide.Shapes.Count
+                    + "; textShapes=" + textShapes + "; tables=" + tables + "; groups=" + groups
+                    + "; pictures=" + pictures + "; charts=" + charts
+                    + "; notes=" + (string.IsNullOrWhiteSpace(notes) ? "no" : "yes")
                     + "; title=" + TextUtil.Truncate(GetSlideTitle(slide), 120));
             }
             sb.AppendLine("nextOffset=" + (end < total ? end.ToString() : "none"));
-            sb.AppendLine("Read each shape by slide/shape/start/count. Shape text is not a full visual inspection; tables, groups and embedded objects may require slide capture.");
+            sb.AppendLine("Use read_document_section by slide/shape for text, tables, groups and object metadata, or {slide,part:'notes',start,count} for speaker notes. This is direct PowerPoint object-model inspection.");
             return sb.ToString();
         }
 
         public string ReadDocumentSection(ToolArguments args)
         {
             var pres = _app.ActivePresentation;
+            if (pres == null) throw new InvalidOperationException("No PowerPoint presentation is open.");
             int slideIndex = args.Integer("slide", 1, 1, pres.Slides.Count);
             var slide = pres.Slides[slideIndex];
+            string part = (args.Get("part", "") ?? "").Trim().ToLowerInvariant();
+
+            if (part == "notes")
+            {
+                var noteShape = GetNotesBodyShape(slide);
+                if (noteShape == null || noteShape.TextFrame == null) return "This slide has no readable notes body.";
+                var noteRange = noteShape.TextFrame.TextRange;
+                int noteStart = args.Integer("start", 0, 0, noteRange.Length);
+                int noteCount = args.Integer("count", 3000, 1, 4000);
+                int noteLength = Math.Min(noteCount, noteRange.Length - noteStart);
+                string noteText = noteLength == 0 ? "" : noteRange.Characters(noteStart + 1, noteLength).Text;
+                return "Slide=" + slideIndex + "; part=notes; text [" + noteStart + "," + (noteStart + noteLength)
+                    + "); nextStart=" + (noteStart + noteLength < noteRange.Length ? (noteStart + noteLength).ToString() : "none")
+                    + "\n" + noteText;
+            }
+
             int shapeIndex = args.Integer("shape", 1, 1, slide.Shapes.Count);
             var shape = slide.Shapes[shapeIndex];
-            if (shape.HasTextFrame != Office.MsoTriState.msoTrue)
-                return "This shape has no text frame. Use capture_slide_as_image for its visible content.";
-            var range = shape.TextFrame.TextRange;
-            int start = args.Integer("start", 0, 0, range.Length);
-            int count = args.Integer("count", 3000, 1, 4000);
-            int length = Math.Min(count, range.Length - start);
-            string text = length == 0 ? "" : range.Characters(start + 1, length).Text;
-            return "Slide=" + slideIndex + "; shape=" + shapeIndex + "; text [" + start + "," + (start+length)
-                + "); nextStart=" + (start+length < range.Length ? (start+length).ToString() : "none") + "\n" + text;
+
+            try
+            {
+                if (shape.HasTable == Office.MsoTriState.msoTrue)
+                {
+                    var table = shape.Table;
+                    var sb = new StringBuilder();
+                    sb.AppendLine("Slide=" + slideIndex + "; shape=" + shapeIndex + "; name=" + shape.Name
+                        + "; type=table; rows=" + table.Rows.Count + "; columns=" + table.Columns.Count);
+                    int emitted = 0;
+                    for (int r = 1; r <= table.Rows.Count && emitted < 120; r++)
+                    {
+                        for (int col = 1; col <= table.Columns.Count && emitted < 120; col++)
+                        {
+                            string text = "";
+                            try { text = table.Cell(r, col).Shape.TextFrame.TextRange.Text ?? ""; } catch { }
+                            sb.AppendLine("row=" + r + ",column=" + col + "; text="
+                                + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(text, 400)));
+                            emitted++;
+                        }
+                    }
+                    if (emitted < table.Rows.Count * table.Columns.Count)
+                        sb.AppendLine("PARTIAL: table cell output capped at 120 cells.");
+                    return sb.ToString();
+                }
+            }
+            catch { }
+
+            if (shape.Type == Office.MsoShapeType.msoGroup)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("Slide=" + slideIndex + "; shape=" + shapeIndex + "; name=" + shape.Name
+                    + "; type=group; items=" + shape.GroupItems.Count);
+                for (int i = 1; i <= shape.GroupItems.Count && i <= 80; i++)
+                {
+                    var item = shape.GroupItems[i];
+                    string text = "";
+                    try
+                    {
+                        if (item.HasTextFrame == Office.MsoTriState.msoTrue &&
+                            item.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                            text = item.TextFrame.TextRange.Text ?? "";
+                    }
+                    catch { }
+                    sb.AppendLine("item=" + i + "; name=" + item.Name + "; type=" + item.Type
+                        + "; text=" + Newtonsoft.Json.JsonConvert.SerializeObject(TextUtil.Truncate(text, 300)));
+                }
+                return sb.ToString();
+            }
+
+            if (shape.HasTextFrame == Office.MsoTriState.msoTrue)
+            {
+                var range = shape.TextFrame.TextRange;
+                int start = args.Integer("start", 0, 0, range.Length);
+                int count = args.Integer("count", 3000, 1, 4000);
+                int length = Math.Min(count, range.Length - start);
+                string text = length == 0 ? "" : range.Characters(start + 1, length).Text;
+                return "Slide=" + slideIndex + "; shape=" + shapeIndex + "; name=" + shape.Name
+                    + "; type=" + shape.Type + "; text [" + start + "," + (start + length)
+                    + "); nextStart=" + (start + length < range.Length ? (start + length).ToString() : "none")
+                    + "\n" + text;
+            }
+
+            return "Slide=" + slideIndex + "; shape=" + shapeIndex + "; name=" + shape.Name
+                + "; type=" + shape.Type + "; left=" + shape.Left + "; top=" + shape.Top
+                + "; width=" + shape.Width + "; height=" + shape.Height
+                + ". No text frame is present; visual pixels still require slide capture.";
         }
 
         public byte[] CaptureChartAsImage(string chartName) { return null; }
