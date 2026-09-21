@@ -662,9 +662,10 @@ namespace OMNIX.Core.AiGateway
     {
         private static readonly string[] NegativeMarkers =
         {
-            "do not create", "don't create", "do not edit", "don't edit", "do not change",
-            "don't change", "do not write", "don't write", "do not delete", "don't delete",
-            "نساز", "ایجاد نکن", "تغییر نده", "ویرایش نکن", "حذف نکن", "ننویس"
+            "do not make any changes", "don't make any changes", "do not modify anything",
+            "don't modify anything", "read only", "review only", "inspect only",
+            "هیچ تغییری نده", "هیچ چیزی را تغییر نده", "فقط بررسی کن", "فقط بخوان",
+            "فقط تحلیل کن", "نساز", "چیزی نساز"
         };
 
         private static readonly string[] MutationMarkers =
