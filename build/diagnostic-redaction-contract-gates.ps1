@@ -53,6 +53,17 @@ Require 'tools/provider-error-redaction-acceptance.ps1' 'Guid.NewGuid()' 'redact
 Require '.github/workflows/request-budget.yml' 'provider-error-redaction-acceptance.ps1' 'runtime CI must execute compiled diagnostic redaction acceptance.'
 Require '.github/workflows/request-budget.yml' 'PROVIDER-ERROR-REDACTION-RUNTIME-001' 'runtime CI must validate the redaction report TestId.'
 
+$journal = 'src/OMNIX.Core/Logging/RuntimeDiagnosticJournal.cs'
+Require $journal 'runtime-journey' 'human-readable runtime journey log must remain available.'
+Require $journal 'runtime-events' 'structured JSONL runtime event log must remain available.'
+Require $journal 'traceId' 'runtime events must carry request correlation identifiers.'
+Require $journal 'SafeDetail' 'runtime detail metadata must pass through a redaction/sanitization boundary.'
+Forbid $journal 'ArgumentsJson' 'tool arguments/document payload must never be written to runtime diagnostics.'
+Forbid $journal 'UserTurn.Text' 'prompt text must never be written to runtime diagnostics.'
+Require 'tools/runtime-diagnostic-journal-acceptance.ps1' 'RUNTIME-DIAGNOSTIC-JOURNAL-001' 'compiled journal behavior needs a stable runtime TestId.'
+Require '.github/workflows/request-budget.yml' 'runtime-diagnostic-journal-acceptance.ps1' 'runtime CI must execute diagnostic journal acceptance.'
+Require '.github/workflows/request-budget.yml' 'RUNTIME-DIAGNOSTIC-JOURNAL-001' 'runtime CI must validate the journal report TestId.'
+
 if ($failures.Count -gt 0) {
     Write-Host 'OMNIX DIAGNOSTIC-REDACTION CONTRACT: FAIL' -ForegroundColor Red
     foreach ($f in $failures) { Write-Host " - $f" -ForegroundColor Red }
