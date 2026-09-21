@@ -15,11 +15,26 @@ namespace OMNIX.Core.AiGateway
         public string BaseUrl { get; set; }
     }
 
+    public sealed class ToolDefinition
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public string ParametersJson { get; set; }
+    }
+
+    public sealed class NativeToolCall
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string ArgumentsJson { get; set; }
+    }
+
     public sealed class ChatRequest
     {
         public string SystemPrompt { get; set; }
         public List<ChatTurn> History { get; set; }
         public ChatTurn UserTurn { get; set; }
+        public List<ToolDefinition> Tools { get; set; }
 
         public bool HasImages
         {
@@ -39,6 +54,12 @@ namespace OMNIX.Core.AiGateway
         public string Text { get; set; }
         public string Model { get; set; }
         public bool WasCancelled { get; set; }
+        public List<NativeToolCall> ToolCalls { get; set; }
+
+        public bool HasToolCalls
+        {
+            get { return ToolCalls != null && ToolCalls.Count > 0; }
+        }
     }
 
     /// <summary>
@@ -104,7 +125,8 @@ namespace OMNIX.Core.AiGateway
                 SystemPrompt = TruncatePreservingEnds(source.SystemPrompt, MaxSystemPromptChars),
                 History = BuildBoundedHistory(source.History, maxTurns, maxHistoryChars,
                     source.UserTurn != null ? source.UserTurn.Text : null),
-                UserTurn = CloneCurrentTurn(source.UserTurn)
+                UserTurn = CloneCurrentTurn(source.UserTurn),
+                Tools = source.Tools == null ? null : new List<ToolDefinition>(source.Tools)
             };
             return result;
         }
