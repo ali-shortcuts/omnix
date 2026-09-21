@@ -26,6 +26,8 @@ namespace OMNIX.Core.AiGateway
     public sealed class AiGateway
     {
         private const int MaxProviderToolRounds = 24;
+        private const int MaxMutationRepairTurns = 2;
+        private const int MaxProtocolRepairTurns = 2;
         private readonly ProviderRegistry _registry;
         private readonly ProviderHealthTracker _health;
         private readonly ProviderRouter _router;
@@ -87,6 +89,42 @@ namespace OMNIX.Core.AiGateway
             ChatResponse final = null;
             bool accessClarified = false;
             bool writeAttempted = false;
+            bool writeSucceeded = false;
+            string lastWriteFailure = null;
+            int mutationRepairTurns = 0;
+            int protocolRepairTurns = 0;
+            bool mutationRequested = MutationIntentDetector.IsLikelyMutation(request.UserTurn != null ? request.UserTurn.Text : null);
+            string runtimePreflight = "";
+
+            if (mutationRequested && hostAdapter != null && toolExecutor != null)
+            {
+                try
+                {
+                    var access = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" },
+                        hostAdapter).ConfigureAwait(true);
+                    var map = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadDocumentMap, ArgumentsJson = "{\"offset\":0}" },
+                        hostAdapter).ConfigureAwait(true);
+                    accessClarified = true;
+                    runtimePreflight =
+                        "OMNIX RUNTIME PREFLIGHT (authoritative, measured before provider execution):\n" +
+                        "Office access: " + SafeRuntimeSummary(access != null ? access.ContentForModel : null, 1400) + "\n" +
+                        "Document map: " + SafeRuntimeSummary(map != null ? map.ContentForModel : null, 2200) + "\n" +
+                        "The original user request requires actual Office mutation. A text-only answer is not completion.";
+                    Logger.Gateway("Mutation preflight completed; accessSuccess=" + (access != null && access.Success) +
+                                   "; mapSuccess=" + (map != null && map.Success));
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Logger.Error("gateway", "Mutation preflight failed; provider may still inspect with normal tools.", ex);
+                    runtimePreflight =
+                        "OMNIX RUNTIME PREFLIGHT: mutation requested, but automatic preflight could not complete. " +
+                        "Use read_office_access/read_document_map before making any access claim.";
+                }
+            }
+
             for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 // Refresh the Office runtime envelope before EVERY provider turn. A previous tool
@@ -103,11 +141,15 @@ namespace OMNIX.Core.AiGateway
                     Logger.Error("gateway", "Could not refresh live Office host context; using request-start context.", ex);
                 }
 
+                if (!string.IsNullOrEmpty(runtimePreflight))
+                    liveSystemPrompt += "\n\n" + runtimePreflight;
+
                 var req = new ChatRequest
                 {
                     SystemPrompt = liveSystemPrompt,
                     History = history,
-                    UserTurn = current
+                    UserTurn = current,
+                    UseNativeTools = true
                 };
 
                 IProviderAdapter provider = _router.Resolve(SettingsManager.Instance.Settings.SelectedProviderId, req.HasImages);
