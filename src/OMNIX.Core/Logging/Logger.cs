@@ -36,6 +36,8 @@ namespace OMNIX.Core.Logging
         public static void Startup(string message) { Write("startup-debug", message); }
         public static void Ui(string message) { Write("ui-debug", message); }
         public static void Gateway(string message) { Write("gateway-debug", message); }
+        public static void RuntimeJourney(string message) { Write("runtime-journey", message); }
+        public static void RuntimeEventJson(string json) { WriteRawJsonLine("runtime-events", json); }
         public static void Install(string message) { Write("install-debug", message); }
         public static void Error(string source, string message, Exception ex) { Write(source, message + (ex == null ? "" : " | " + ex.GetType().Name + ": " + ex.Message + " | stack: " + ex.StackTrace)); }
 
@@ -58,6 +60,24 @@ namespace OMNIX.Core.Logging
             catch
             {
                 // Logging must never crash the add-in.
+            }
+        }
+
+        private static void WriteRawJsonLine(string streamName, string json)
+        {
+            try
+            {
+                lock (Gate)
+                {
+                    Directory.CreateDirectory(LogsDir);
+                    string path = Path.Combine(LogsDir, streamName + ".jsonl");
+                    RotateIfNeeded(path);
+                    File.AppendAllText(path, (json ?? "{}") + Environment.NewLine, Encoding.UTF8);
+                }
+            }
+            catch
+            {
+                // Diagnostics must never crash the add-in.
             }
         }
 
