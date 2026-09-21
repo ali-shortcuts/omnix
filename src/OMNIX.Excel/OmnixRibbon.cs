@@ -50,6 +50,8 @@ namespace OMNIX.Excel
         public void Ribbon_Load(Office.IRibbonUI ribbonUi)
         {
             _ribbonUi = ribbonUi;
+            var visibleHost = _addIn.Adapter as OMNIX.Core.Context.IVisibleOfficeExecutionHost;
+            if (visibleHost != null) visibleHost.BindRibbon(ribbonUi);
         }
 
         public bool GetVisible(Office.IRibbonControl control)
