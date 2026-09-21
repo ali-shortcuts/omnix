@@ -12,20 +12,30 @@ already verified replacement for a database designer/accountant.
   without selecting cells or opening another document. All calls retain request
   cancellation, document-scope isolation, cloud consent and untrusted-data wrapping.
 - Excel: worksheet map in pages of 20; explicit rectangular reads of at most 256
-  cells, with values/formulas and partial-coverage markers. Per-cell strings are
-  capped at 600 characters. This is not an unbounded workbook export.
-- Word: main-story text in character windows of at most 4000. Headers, footers,
-  footnotes, comments and text boxes are not included by this new read tool.
-- PowerPoint: slide map in pages of 20 and paginated individual shape text.
-  Grouped objects, tables and notes are not fully covered by the new text reader.
-  Existing slide capture remains useful for visible non-text content.
+  cells, with values, formulas, number formats and partial-coverage markers.
+  Worksheet maps also report direct object-model counts for tables, charts and
+  shapes. Per-cell strings are capped at 600 characters. This is not an unbounded
+  workbook export.
+- Word: `read_document_map` now enumerates available Word story ranges when
+  present, including main text, headers/footers, comments, footnotes/endnotes and
+  text frames. `read_document_section` reads one selected story in bounded
+  character windows of at most 4000. This is object-model inspection, not screen
+  capture, and unsupported embedded object internals are not inferred.
+- PowerPoint: slide maps report counts for text shapes, tables, groups, pictures
+  and charts. Bounded reads can inspect individual shape text, table cells,
+  grouped-item metadata and speaker notes. Pixel-only appearance still requires
+  slide capture.
 - Excel `create_data_table`: one new named worksheet with a styled table, up to
   24 columns/50 data rows and a 32000-character plan. Each write is previewed.
-  Existing sheets are not overwritten. Strings are literal, not executed formulas.
-  Headers, cell values and table dimensions are read back. Each operation is capped at 512 cells including headers. A failed operation attempts to remove
-  only its own new worksheet and reports cleanup failure rather than claiming
-  atomic success. Empty data creates one blank input row. Delete the new sheet
-  to reverse; native Ctrl+Z is not guaranteed for this operation.
+  Existing sheets are never overwritten; `uniqueName=true` can bind a fresh
+  suffix before approval. Primitive strings remain literal data. Explicit typed
+  cells can store real Excel formulas or ISO dates, with optional number formats.
+  Columns are AutoFit with a width cap. Headers, typed cell values/formulas and
+  table dimensions are read back before success. Each operation is capped at
+  512 cells including headers. A failed operation attempts to remove only its own
+  new worksheet and reports cleanup failure rather than claiming atomic success.
+  Empty data creates one blank input row. Delete the new sheet to reverse; native
+  Ctrl+Z is not guaranteed for this operation.
 - Eight provider turns per request, followed by an explicit incomplete-work notice
   if exhausted. Large jobs must be staged; this does not promise autonomous
   completion of an arbitrarily large workbook.
@@ -41,10 +51,11 @@ key or Office desktop is available in the hosted build to prove that end to end.
 
 ## Still needed for a mature business-system builder
 
-Typed schema/validation and relationships; multi-sheet plans with resumable progress;
-formula dependency/error checks; reliable reversible multi-step edits; pivot tables,
-charts and reports; richer Word/PPT creation and coverage; actual business acceptance
-fixtures. Do not describe these as implemented by the new table tool.
+Relational schema/validation and relationships; resumable multi-sheet transaction
+plans; formula dependency/error audits; reliable reversible multi-step edits; pivot
+tables, chart/report builders; richer Word/PPT creation; arbitrary Ribbon automation;
+and actual business acceptance fixtures. Do not describe these as implemented by the
+current table/object-model tools.
 
 ## Compatibility and evidence
 
