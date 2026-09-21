@@ -184,13 +184,19 @@ namespace OMNIX.Core.AiGateway
                     "round=" + (round + 1) + "; nativeTools=" + req.UseNativeTools + "; images=" + req.HasImages);
 
                 if (req.HasImages && !provider.SupportsVisionNow())
+                {
+                    RuntimeDiagnosticJournal.Event("provider_guard", null, "vision_not_supported", null, ErrorCode.MODEL_ERROR, null);
+                    RuntimeDiagnosticJournal.AbandonRequest("vision_not_supported", ErrorCode.MODEL_ERROR);
                     throw new OmnixException(ErrorCode.MODEL_ERROR,
                         Localization.Strings.T("Err.VisionNotSupported"),
                         "Provider=" + provider.Info.Id + "; model=" + (provider.Info.DefaultModel ?? "?") + "; request has images.",
                         "Use a Vision-capable provider/model or send text-only context.");
+                }
 
                 if (_health.IsCircuitOpen(provider.Info.Id))
                 {
+                    RuntimeDiagnosticJournal.Event("provider_guard", null, "circuit_open", null, ErrorCode.PROVIDER_ERROR, null);
+                    RuntimeDiagnosticJournal.AbandonRequest("circuit_open", ErrorCode.PROVIDER_ERROR);
                     SuggestAlternative(provider, req.HasImages, "circuit_open");
                     TimeSpan remaining = _health.GetRemainingCooldown(provider.Info.Id);
                     throw OmnixException.Provider(
@@ -204,8 +210,22 @@ namespace OMNIX.Core.AiGateway
                     ((provider.Info.Id == "custom" || provider.Info.Id == "agentrouter") ? SettingsManager.Instance.Settings.EndpointConfig(provider.Info.Id).BaseUrl : "");
                 if (!approvedProviders.Contains(approvalIdentity))
                 {
-                    await _privacy.EnsureAllowedAsync(provider).ConfigureAwait(true);
-                    approvedProviders.Add(approvalIdentity);
+                    long privacyTimer = RuntimeDiagnosticJournal.StartTimer();
+                    RuntimeDiagnosticJournal.Event("privacy_check", null, "start", null, null, null);
+                    try
+                    {
+                        await _privacy.EnsureAllowedAsync(provider).ConfigureAwait(true);
+                        approvedProviders.Add(approvalIdentity);
+                        RuntimeDiagnosticJournal.Event("privacy_check", null, "allowed",
+                            RuntimeDiagnosticJournal.ElapsedMs(privacyTimer), null, null);
+                    }
+                    catch (OmnixException ex)
+                    {
+                        RuntimeDiagnosticJournal.Event("privacy_check", null, "blocked",
+                            RuntimeDiagnosticJournal.ElapsedMs(privacyTimer), ex.Code, null);
+                        RuntimeDiagnosticJournal.AbandonRequest("privacy_blocked", ex.Code);
+                        throw;
+                    }
                 }
 
                 ChatResponse response;
@@ -233,6 +253,7 @@ namespace OMNIX.Core.AiGateway
                         "round=" + (round + 1));
                     if (ShouldSuggestAlternative(ex))
                         SuggestAlternative(provider, req.HasImages, "request_failure_" + ex.Code);
+                    RuntimeDiagnosticJournal.AbandonRequest("provider_error", ex.Code);
                     throw;
                 }
 
@@ -253,6 +274,7 @@ namespace OMNIX.Core.AiGateway
                         }
                         return MutationRuntimeFailure("The selected model/provider returned no executable write tool call. No Office changes were made.");
                     }
+                    RuntimeDiagnosticJournal.CompleteRequest("empty_response", successfulWrites, failedWrites, lastWriteVerified);
                     return new ChatResponse { Text = "" };
                 }
 
@@ -343,6 +365,7 @@ namespace OMNIX.Core.AiGateway
                 if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text))
                 {
                     accessClarified = true;
+                    RuntimeDiagnosticJournal.Event("access_claim_repair", null, "unverified_access_claim", null, null, null);
                     var access = await toolExecutor.ExecuteAsync(
                         new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" },
                         hostAdapter).ConfigureAwait(true);
