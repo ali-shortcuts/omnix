@@ -27,3 +27,20 @@ Word formulas are fields and are not the Excel function engine. PowerPoint is no
 This update does not implement universal ribbon automation or unrestricted full-document vision. Existing bounded structural reads and captures remain scoped to the active document; headers, comments, embedded objects and other unsupported areas must not be represented as fully visible. Existing write tools remain the supported execution surface. Agent Router credentials and every remote model cannot be validated without the user's configured service.
 
 Windows build/runtime acceptance must pass before publishing an installer. GitHub-hosted checks do not substitute for installed Excel/Word/PowerPoint tests across Office versions. UI XML and whitespace checks are only preliminary validation, not runtime proof.
+
+
+## Live workspace and provider-tool compatibility
+
+- Chat bubbles now resolve/copy theme brushes into the FlowDocument itself so dark-mode
+  text does not fall back to black when Office hosts WPF without a normal Application
+  resource tree.
+- The tool-call parser accepts the existing OMNIX fenced/XML protocol plus provider-native
+  textual calls such as `<|tool_call_start|>[write_to_cell(...)]<|tool_call_end|>`.
+  Parsing remains data-only: no reflection/eval is used, only one call is accepted, and
+  the normal whitelist, scope guard and write confirmation still apply.
+- Provider-native tool protocol markers are filtered from streaming UI output.
+- Chat includes a persistent Live activity panel showing real request/tool phases and
+  friendly Office targets (for example a worksheet or cell) without exposing internal JSON.
+  It never pretends to click a Ribbon control that was not actually invoked.
+- Learn now has a local English/Persian selector. This changes the reference presentation
+  only; installer and provider/settings behavior are unchanged.
