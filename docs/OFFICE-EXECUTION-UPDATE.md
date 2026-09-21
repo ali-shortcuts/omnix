@@ -75,8 +75,8 @@ Settings now treats provider connectivity and model inference as different facts
 
 OMNIX now exposes a queryable, host-specific Object Model capability catalog through
 `list_office_capabilities` and a single validated mutation boundary
-`execute_office_capability`. The catalog now contains **190 implemented operations**:
-**80 Excel**, **61 Word**, and **49 PowerPoint**, in addition to the existing bounded read,
+`execute_office_capability`. The catalog now contains **200 implemented operations**:
+**85 Excel**, **64 Word**, and **51 PowerPoint**, in addition to the existing bounded read,
 Vision, table-building, formula, formatting, notes, and slide tools.
 
 The capability engine covers major professional surfaces including worksheet/range/data validation, conditional formatting, workbook/worksheet protection, calculation, outline/grouping,
@@ -117,3 +117,29 @@ OMNIX no longer relies only on models reproducing a textual `omnix_tool` block c
 - Legacy textual fallback tool names may include common provider namespaces (for example
   `omnix.write_to_cell`); normalization is accepted only when it resolves to an existing hard-whitelisted
   canonical tool. This improves compatibility without expanding the executable surface.
+
+## Runtime diagnostic journal
+
+OMNIX now records a dedicated privacy-preserving execution trail for troubleshooting real provider/tool failures:
+
+- `%LOCALAPPDATA%\OMNIX\logs\runtime-journey.log` is a concise human-readable timeline.
+- `%LOCALAPPDATA%\OMNIX\logs\runtime-events.jsonl` is a structured event stream for reconstruction.
+- Each request receives a short correlation/trace id. Provider rounds, native/text tool parsing,
+  whitelist decisions, protocol/mutation/verification repair turns, tool dispatch, preview,
+  confirmation, Office apply, visible target reveal, read-back verification, latency and final
+  completion/abort status are correlated through that id.
+- The structured log records tool/capability identifiers and status metadata only. It does **not**
+  log prompts, chat/history text, Office cell/document content, tool argument payloads, API keys,
+  custom Base URLs, provider response bodies, or stack traces.
+- `OMNIX-Diagnose.bat` surfaces the tail of both logs so a failure report can be sent without
+  copying settings or chat-history files.
+
+The runtime journal is diagnostic evidence, not a second execution engine: it cannot authorize a
+tool, bypass confirmation, or expand the whitelist.
+
+## Capability expansion in this revision
+
+The catalog adds ten practical Object Model operations while preserving the same confirmed mutation
+boundary: Excel worksheet delete/copy, bounded full range clear, chart type/source changes; Word
+selection highlight/clear-formatting and hyperlink removal; PowerPoint master-background control
+and text-frame margins.
