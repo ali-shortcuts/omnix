@@ -52,7 +52,7 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
-            ActivateRelevantRibbonTab(toolName);
+            ActivateRelevantRibbonTab(toolName, args);
             var wb = _app.ActiveWorkbook;
             if (wb == null) return;
 
@@ -150,23 +150,43 @@ namespace OMNIX.Core.Context
             }
         }
 
-        private void ActivateRelevantRibbonTab(string toolName)
+        private void ActivateRelevantRibbonTab(string toolName, ToolArguments args)
         {
             string tab = null;
-            switch (toolName)
+            if (toolName == ToolNames.ApplyOfficeCapability || toolName == ToolNames.InspectOfficeCapability)
             {
-                case ToolNames.InsertFormula: tab = "TabFormulas"; break;
-                case ToolNames.CreateDataTable: tab = "TabInsert"; break;
-                case ToolNames.ReadDocumentMap:
-                case ToolNames.ReadDocumentSection: tab = "TabData"; break;
-                case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
-                case ToolNames.ApplyOfficeCapability:
-                case ToolNames.InspectOfficeCapability:
-                case ToolNames.WriteToCell:
-                case ToolNames.HighlightRange:
-                case ToolNames.FormatRange:
-                case ToolNames.ReadSelection:
-                case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+                string op = args != null ? args.Get("operation", "") : "";
+                if (op.StartsWith("sort.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("validation.", StringComparison.OrdinalIgnoreCase) ||
+                    op.StartsWith("pivot.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabData";
+                else if (op.StartsWith("chart.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         op.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabInsert";
+                else if (op.StartsWith("page_setup.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabPageLayoutExcel";
+                else if (op.StartsWith("view.", StringComparison.OrdinalIgnoreCase))
+                    tab = "TabView";
+                else
+                    tab = "TabHome";
+            }
+            else
+            {
+                switch (toolName)
+                {
+                    case ToolNames.InsertFormula: tab = "TabFormulas"; break;
+                    case ToolNames.CreateDataTable: tab = "TabInsert"; break;
+                    case ToolNames.ReadDocumentMap:
+                    case ToolNames.ReadDocumentSection: tab = "TabData"; break;
+                    case ToolNames.CaptureChartAsImage: tab = "TabInsert"; break;
+                    case ToolNames.WriteToCell:
+                    case ToolNames.HighlightRange:
+                    case ToolNames.FormatRange:
+                    case ToolNames.ReadSelection:
+                    case ToolNames.CaptureCurrentViewAsImage: tab = "TabHome"; break;
+                }
             }
             if (tab == null || _ribbonUi == null) return;
             try { _ribbonUi.ActivateTabMso(tab); }
