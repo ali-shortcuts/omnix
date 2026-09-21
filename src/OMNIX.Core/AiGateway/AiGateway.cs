@@ -444,6 +444,38 @@ namespace OMNIX.Core.AiGateway
             return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
         }
 
+        private static bool IsVerificationTool(string name)
+        {
+            string tool = ToolNames.Normalize(name);
+            return tool == ToolNames.ReadDocumentSection ||
+                   tool == ToolNames.ReadDocumentMap ||
+                   tool == ToolNames.ReadSelection ||
+                   tool == ToolNames.ReadDocument ||
+                   tool == ToolNames.ReadPresentation;
+        }
+
+        private static string InternalAssistantHistory(ChatResponse response, ToolCall call)
+        {
+            if (response != null && !string.IsNullOrWhiteSpace(response.Text))
+                return response.Text;
+            return call == null
+                ? "OMNIX internal provider turn."
+                : "OMNIX NATIVE TOOL REQUEST: " + SafeToolName(call.Name);
+        }
+
+        private static string SafeToolName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "none";
+            var sb = new StringBuilder();
+            foreach (char ch in name)
+            {
+                if (sb.Length >= 80) break;
+                if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.')
+                    sb.Append(ch);
+            }
+            return sb.Length == 0 ? "invalid" : sb.ToString();
+        }
+
         private bool ShouldSuggestAlternative(OmnixException ex)
         {
             if (ex == null) return false;
