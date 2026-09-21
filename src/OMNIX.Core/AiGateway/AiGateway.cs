@@ -202,58 +202,216 @@ namespace OMNIX.Core.AiGateway
                     throw;
                 }
 
-                if (response == null || string.IsNullOrEmpty(response.Text))
+                if (response == null)
                 {
-                    visibleDelta.Complete(true, response != null ? response.Text : null);
-                    final = response ?? new ChatResponse { Text = "" };
-                    return final;
+                    visibleDelta.Complete(true, null);
+                    Logger.Gateway("Tool runtime response: provider=" + provider.Info.Id + "; kind=null");
+                    return new ChatResponse { Text = "" };
                 }
 
-                var call = ToolCallParser.Parse(response.Text);
+                ToolCall call = null;
+                string responseKind = "text_final";
+                if (response.HasToolCalls)
+                {
+                    responseKind = "native_tool";
+                    if (response.ToolCalls.Count > 1)
+                        Logger.Gateway("Tool runtime: provider=" + provider.Info.Id +
+                            "; nativeToolCount=" + response.ToolCalls.Count +
+                            "; executing first call only; remaining calls must be requested sequentially.");
+                    call = ToolCallParser.FromNative(response.ToolCalls[0]);
+                }
+                else if (!string.IsNullOrEmpty(response.Text))
+                {
+                    call = ToolCallParser.Parse(response.Text);
+                    if (call != null) responseKind = "text_tool";
+                }
+                else
+                {
+                    responseKind = "empty";
+                }
+
                 // If there is no internal tool call, flush the small held-back suffix and keep
-                // ordinary network streaming. If there is a tool call, the protocol suffix stays
-                // suppressed and only the later user-facing answer reaches the chat bubble.
+                // ordinary text visible. Native tool calls are never rendered into the chat pane.
                 visibleDelta.Complete(call == null, response.Text);
 
-                if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text))
+                string diagnosticTool = call != null ? ToolNames.Normalize(call.Name) : "";
+                Logger.Gateway("Tool runtime response: provider=" + provider.Info.Id +
+                    "; kind=" + responseKind +
+                    "; tool=" + (string.IsNullOrEmpty(diagnosticTool) ? "none" : diagnosticTool) +
+                    "; whitelisted=" + (call != null && ToolNames.IsWhitelisted(diagnosticTool)) +
+                    "; mutationRequired=" + mutationRequired +
+                    "; writeAttempted=" + writeAttempted);
+
+                if (call != null && string.IsNullOrWhiteSpace(call.Name))
+                {
+                    toolRepairCount++;
+                    history.Add(current);
+                    history.Add(new ChatTurn
+                    {
+                        Role = ChatRole.Assistant,
+                        Text = InternalAssistantHistory(response, call),
+                        TimestampUtc = DateTime.UtcNow
+                    });
+
+                    if (toolRepairCount <= 2)
+                    {
+                        current = new ChatTurn
+                        {
+                            Role = ChatRole.User,
+                            Text = "OMNIX RUNTIME TOOL REPAIR: the provider emitted a malformed tool request. " +
+                                   "Use exactly one of the native tools supplied by OMNIX and send a JSON object for its arguments. " +
+                                   "Do not answer with manual Office instructions while the requested action is executable.",
+                            TimestampUtc = DateTime.UtcNow
+                        };
+                        continue;
+                    }
+
+                    return new ChatResponse
+                    {
+                        Text = "OMNIX could not obtain a valid structured tool call from the selected model after repair attempts. " +
+                               "No additional Office changes were applied in this failed step. Try another verified model/provider or run Test model."
+                    };
+                }
+
+                if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text) &&
+                    toolExecutor != null && hostAdapter != null)
                 {
                     accessClarified = true;
-                    var access = await toolExecutor.ExecuteAsync(new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" }, hostAdapter).ConfigureAwait(true);
+                    var access = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" }, hostAdapter).ConfigureAwait(true);
                     history.Add(current);
-                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
-                    current = new ChatTurn { Role = ChatRole.User, TimestampUtc = DateTime.UtcNow,
-                        Text = "OMNIX RUNTIME ACCESS CHECK: " + access.ContentForModel +
-                        "\nYour previous access claim was not backed by a write tool result. Use this measured state. If the original user requested a change and the relevant target is available, invoke its documented tool through normal confirmation. Otherwise report the specific measured blocker or uncertainty. Do not invent a permission problem, do not bypass protection, and do not claim completion without a tool result." };
-                    continue;
-                }
-
-                if (call == null)
-                {
-                    Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted + "; accessClarified=" + accessClarified);
-                    final = response;
-                    return final;
-                }
-
-                if (!ToolNames.IsWhitelisted(call.Name))
-                {
-                    string note = string.Format(Localization.Strings.T("S.Tools.UnknownTool"), call.Name);
-                    history.Add(current);
-                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
+                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text ?? "", TimestampUtc = DateTime.UtcNow });
                     current = new ChatTurn
                     {
                         Role = ChatRole.User,
-                        Text = "OMNIX TOOL RESULT: " + note,
-                        TimestampUtc = DateTime.UtcNow
+                        TimestampUtc = DateTime.UtcNow,
+                        Text = "OMNIX RUNTIME ACCESS CHECK: " + access.ContentForModel +
+                               "\nYour previous access claim was not backed by a write tool result. Use this measured state. " +
+                               "If the original user requested a change and the relevant target is available, invoke its documented native tool through normal confirmation. " +
+                               "Otherwise report the specific measured blocker or uncertainty."
                     };
                     continue;
                 }
 
-                if (ToolNames.IsWriteTool(call.Name)) writeAttempted = true;
+                if (call == null && mutationRequired && !writeAttempted)
+                {
+                    mutationRepairCount++;
+                    Logger.Gateway("Mutation enforcement: text-only response rejected; repair=" + mutationRepairCount);
+                    history.Add(current);
+                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text ?? "", TimestampUtc = DateTime.UtcNow });
+
+                    if (mutationRepairCount <= 2)
+                    {
+                        current = new ChatTurn
+                        {
+                            Role = ChatRole.User,
+                            TimestampUtc = DateTime.UtcNow,
+                            Text = "OMNIX RUNTIME MUTATION REQUIRED: the original user asked for a real change in the active Office document, " +
+                                   "but your previous turn did not invoke a write tool. Use the native tools/capability catalog now. " +
+                                   "Do not provide VBA, manual steps, a mock table, or claim that writing is unavailable unless a measured runtime/tool result proves a blocker."
+                        };
+                        continue;
+                    }
+
+                    return new ChatResponse
+                    {
+                        Text = "OMNIX did not make the requested Office change because the selected model failed to produce a valid write-tool call after automatic repair attempts. " +
+                               "The document was not falsely reported as completed. Try a verified tool-capable model/provider."
+                    };
+                }
+
+                if (call == null && mutationRequired && writeSucceeded && !lastWriteVerified)
+                {
+                    verificationRepairCount++;
+                    Logger.Gateway("Verification enforcement: final text rejected; repair=" + verificationRepairCount);
+                    history.Add(current);
+                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text ?? "", TimestampUtc = DateTime.UtcNow });
+
+                    if (verificationRepairCount <= 2)
+                    {
+                        current = new ChatTurn
+                        {
+                            Role = ChatRole.User,
+                            TimestampUtc = DateTime.UtcNow,
+                            Text = "OMNIX RUNTIME VERIFICATION REQUIRED: a write succeeded, but no subsequent Office read-back has verified the latest change. " +
+                                   "Use an appropriate read tool on the affected target before giving the final answer. Do not claim success yet."
+                        };
+                        continue;
+                    }
+
+                    return new ChatResponse
+                    {
+                        Text = "OMNIX applied at least one Office change, but automatic read-back verification of the latest change could not be completed. " +
+                               "Inspect the active document before relying on the result."
+                    };
+                }
+
+                if (call == null)
+                {
+                    Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted +
+                                   "; writeSucceeded=" + writeSucceeded +
+                                   "; verified=" + lastWriteVerified +
+                                   "; accessClarified=" + accessClarified);
+                    final = response;
+                    return final;
+                }
+
+                call.Name = ToolNames.Normalize(call.Name);
+                if (!ToolNames.IsWhitelisted(call.Name))
+                {
+                    toolRepairCount++;
+                    Logger.Gateway("Tool runtime rejected unknown tool=" + SafeToolName(call.Name) +
+                                   "; repair=" + toolRepairCount);
+                    string note = string.Format(Localization.Strings.T("S.Tools.UnknownTool"), call.Name);
+                    history.Add(current);
+                    history.Add(new ChatTurn
+                    {
+                        Role = ChatRole.Assistant,
+                        Text = InternalAssistantHistory(response, call),
+                        TimestampUtc = DateTime.UtcNow
+                    });
+                    current = new ChatTurn
+                    {
+                        Role = ChatRole.User,
+                        Text = "OMNIX TOOL RESULT: " + note +
+                               "\nUse one exact tool name from the native tool definitions supplied in this request. Do not invent namespaces or aliases.",
+                        TimestampUtc = DateTime.UtcNow
+                    };
+                    if (toolRepairCount <= 2) continue;
+
+                    return new ChatResponse
+                    {
+                        Text = "OMNIX stopped because the selected model repeatedly requested an unsupported tool. No unapproved tool was executed."
+                    };
+                }
+
+                bool isWrite = ToolNames.IsWriteTool(call.Name);
+                if (isWrite) writeAttempted = true;
+
                 ToolResult result = await toolExecutor.ExecuteAsync(call, hostAdapter).ConfigureAwait(true);
+                Logger.Gateway("Tool runtime execution: tool=" + SafeToolName(call.Name) +
+                               "; write=" + isWrite +
+                               "; success=" + result.Success);
+
+                if (isWrite && result.Success)
+                {
+                    writeSucceeded = true;
+                    lastWriteVerified = false;
+                }
+                else if (!isWrite && result.Success && writeSucceeded && IsVerificationTool(call.Name))
+                {
+                    lastWriteVerified = true;
+                }
+
                 history.Add(current);
-                // The provider needs its tool-request text in internal conversation history, even
-                // though the fenced protocol was intentionally hidden from the visible chat UI.
-                history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
+                // Native calls have no useful visible text. Preserve a safe internal transcript so
+                // the next provider turn understands which tool result it is receiving.
+                history.Add(new ChatTurn
+                {
+                    Role = ChatRole.Assistant,
+                    Text = InternalAssistantHistory(response, call),
+                    TimestampUtc = DateTime.UtcNow
+                });
 
                 var toolResultTurn = new ChatTurn
                 {
