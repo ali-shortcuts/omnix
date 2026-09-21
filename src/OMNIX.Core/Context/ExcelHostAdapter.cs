@@ -639,6 +639,7 @@ namespace OMNIX.Core.Context
         private const int ExcelCellTextLimit = 32767;
         private const int ExcelFormulaLengthLimit = 8192;
         private const int MaxHighlightCells = 10000;
+        private const int MaxFormatCells = 10000;
         private const int MaxAddressChars = 128;
 
         public static WritePreview Prepare(ExcelHostAdapter adapter, string toolName, string argumentsJson)
@@ -656,6 +657,15 @@ namespace OMNIX.Core.Context
                 catch { old = "(mixed/unknown)"; }
                 before = "Target " + target.Address[false, false] + " current Interior.ColorIndex: " + old;
             }
+            else if (toolName == ToolNames.FormatRange)
+            {
+                string numberFormat = "(mixed/unknown)";
+                string fontName = "(mixed/unknown)";
+                try { numberFormat = Convert.ToString(target.NumberFormat); } catch { }
+                try { fontName = Convert.ToString(target.Font.Name); } catch { }
+                before = "Target " + target.Address[false, false] + " (" + GetCellCount(target) +
+                         " cells); current font=" + fontName + "; numberFormat=" + numberFormat;
+            }
             else
             {
                 object current = toolName == ToolNames.InsertFormula ? target.Formula : target.Value2;
@@ -668,6 +678,8 @@ namespace OMNIX.Core.Context
                 after = target.Address[false, false] + " will contain: " + TextUtil.Truncate(args.Get("value", ""), 2000);
             else if (toolName == ToolNames.InsertFormula)
                 after = target.Address[false, false] + " formula will be: " + TextUtil.Truncate(args.Get("formula", args.Get("value", "")), 2000);
+            else if (toolName == ToolNames.FormatRange)
+                after = target.Address[false, false] + " (" + GetCellCount(target) + " cells) formatting: " + DescribeFormatting(args);
             else
                 after = target.Address[false, false] + " (" + GetCellCount(target) + " cells) will be highlighted yellow.";
 
@@ -701,6 +713,9 @@ namespace OMNIX.Core.Context
                     break;
                 case ToolNames.HighlightRange:
                     target.Interior.Color = 0x3BEBFF;
+                    break;
+                case ToolNames.FormatRange:
+                    ApplyFormatting(target, args);
                     break;
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR, "Unknown Excel write tool: " + toolName, "", "");
@@ -768,15 +783,17 @@ namespace OMNIX.Core.Context
                         toolName + " resolved to " + cells + " cells.",
                         "Use write_to_cell/insert_formula for one cell at a time, or ask for a smaller explicit change.");
             }
-            else if (toolName == ToolNames.HighlightRange)
+            else if (toolName == ToolNames.HighlightRange || toolName == ToolNames.FormatRange)
             {
                 int configuredCap = Math.Max(1, adapter.MaxCells);
-                long cap = Math.Min(MaxHighlightCells, configuredCap);
+                long hardCap = toolName == ToolNames.FormatRange ? MaxFormatCells : MaxHighlightCells;
+                long cap = Math.Min(hardCap, configuredCap);
                 if (cells > cap)
                     throw new OmnixException(ErrorCode.CORE_ERROR,
-                        "Highlight range is too large for one AI-approved mutation.",
+                        (toolName == ToolNames.FormatRange ? "Format" : "Highlight") + " range is too large for one AI-approved mutation.",
                         "Requested " + cells + " cells; limit=" + cap + ".",
                         "Use a smaller contiguous range and approve it separately.");
+                if (toolName == ToolNames.FormatRange) ValidateFormattingArgs(args);
             }
 
             if (toolName == ToolNames.WriteToCell)
@@ -802,6 +819,152 @@ namespace OMNIX.Core.Context
             }
 
             return target;
+        }
+
+        private static string DescribeFormatting(ToolArguments args)
+        {
+            var items = new List<string>();
+            AddIf(items, "font", args.Get("fontName", ""));
+            AddIf(items, "fontSize", args.Get("fontSize", ""));
+            AddIf(items, "bold", args.Get("bold", ""));
+            AddIf(items, "italic", args.Get("italic", ""));
+            AddIf(items, "underline", args.Get("underline", ""));
+            AddIf(items, "fontColor", args.Get("fontColor", ""));
+            AddIf(items, "fillColor", args.Get("fillColor", ""));
+            AddIf(items, "horizontal", args.Get("horizontalAlignment", ""));
+            AddIf(items, "vertical", args.Get("verticalAlignment", ""));
+            AddIf(items, "numberFormat", args.Get("numberFormat", ""));
+            AddIf(items, "wrapText", args.Get("wrapText", ""));
+            AddIf(items, "border", args.Get("border", ""));
+            AddIf(items, "autofitColumns", args.Get("autofitColumns", ""));
+            AddIf(items, "autofitRows", args.Get("autofitRows", ""));
+            return items.Count == 0 ? "(no formatting properties supplied)" : string.Join(", ", items);
+        }
+
+        private static void AddIf(List<string> items, string label, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) items.Add(label + "=" + value);
+        }
+
+        private static void ValidateFormattingArgs(ToolArguments args)
+        {
+            string fontName = args.Get("fontName", "");
+            if (fontName.Length > 80)
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Font name is too long.", "format_range fontName", "Use a normal installed font name.");
+
+            string fontSize = args.Get("fontSize", "");
+            if (!string.IsNullOrWhiteSpace(fontSize))
+            {
+                double size;
+                if (!double.TryParse(fontSize, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out size) || size < 6 || size > 72)
+                    throw new OmnixException(ErrorCode.CORE_ERROR, "Font size must be between 6 and 72.", "format_range fontSize", "Use a normal Office font size.");
+            }
+
+            ValidateOptionalBool(args, "bold");
+            ValidateOptionalBool(args, "italic");
+            ValidateOptionalBool(args, "underline");
+            ValidateOptionalBool(args, "wrapText");
+            ValidateOptionalBool(args, "autofitColumns");
+            ValidateOptionalBool(args, "autofitRows");
+
+            string numberFormat = args.Get("numberFormat", "");
+            if (numberFormat.Length > 100)
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Number format is too long.", "format_range numberFormat", "Use a concise Excel number format.");
+
+            ValidateAlignment(args.Get("horizontalAlignment", ""), true);
+            ValidateAlignment(args.Get("verticalAlignment", ""), false);
+            ValidateColor(args.Get("fontColor", ""));
+            ValidateColor(args.Get("fillColor", ""));
+
+            string border = args.Get("border", "");
+            if (!string.IsNullOrWhiteSpace(border) &&
+                !string.Equals(border, "none", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(border, "thin", StringComparison.OrdinalIgnoreCase))
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Border must be 'none' or 'thin'.", "format_range border", "Use a supported professional border style.");
+        }
+
+        private static void ValidateOptionalBool(ToolArguments args, string key)
+        {
+            string raw = args.Get(key, "");
+            bool parsed;
+            if (!string.IsNullOrWhiteSpace(raw) && !bool.TryParse(raw, out parsed))
+                throw new OmnixException(ErrorCode.CORE_ERROR, key + " must be true or false.", "format_range " + key, "Use a JSON boolean.");
+        }
+
+        private static void ValidateAlignment(string raw, bool horizontal)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            string value = raw.Trim().ToLowerInvariant();
+            string[] allowed = horizontal
+                ? new[] { "general", "left", "center", "right" }
+                : new[] { "top", "center", "bottom" };
+            if (!allowed.Contains(value))
+                throw new OmnixException(ErrorCode.CORE_ERROR,
+                    (horizontal ? "Horizontal" : "Vertical") + " alignment is unsupported.",
+                    "format_range alignment=" + raw,
+                    "Use " + string.Join(", ", allowed) + ".");
+        }
+
+        private static void ValidateColor(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            string value = raw.Trim();
+            if (value.Length != 7 || value[0] != '#' ||
+                !value.Substring(1).All(ch => Uri.IsHexDigit(ch)))
+                throw new OmnixException(ErrorCode.CORE_ERROR, "Colors must use #RRGGBB.", "format_range color=" + raw, "Use a six-digit RGB color.");
+        }
+
+        private static void ApplyFormatting(Excel.Range target, ToolArguments args)
+        {
+            ValidateFormattingArgs(args);
+
+            string fontName = args.Get("fontName", "");
+            if (!string.IsNullOrWhiteSpace(fontName)) target.Font.Name = fontName;
+
+            string fontSize = args.Get("fontSize", "");
+            if (!string.IsNullOrWhiteSpace(fontSize))
+                target.Font.Size = double.Parse(fontSize, System.Globalization.CultureInfo.InvariantCulture);
+
+            bool value;
+            if (bool.TryParse(args.Get("bold", ""), out value)) target.Font.Bold = value;
+            if (bool.TryParse(args.Get("italic", ""), out value)) target.Font.Italic = value;
+            if (bool.TryParse(args.Get("underline", ""), out value))
+                target.Font.Underline = value ? Excel.XlUnderlineStyle.xlUnderlineStyleSingle : Excel.XlUnderlineStyle.xlUnderlineStyleNone;
+            if (bool.TryParse(args.Get("wrapText", ""), out value)) target.WrapText = value;
+
+            string fontColor = args.Get("fontColor", "");
+            if (!string.IsNullOrWhiteSpace(fontColor))
+                target.Font.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.ColorTranslator.FromHtml(fontColor));
+            string fillColor = args.Get("fillColor", "");
+            if (!string.IsNullOrWhiteSpace(fillColor))
+                target.Interior.Color = System.Drawing.ColorTranslator.ToOle(System.Drawing.ColorTranslator.FromHtml(fillColor));
+
+            string numberFormat = args.Get("numberFormat", "");
+            if (!string.IsNullOrWhiteSpace(numberFormat)) target.NumberFormat = numberFormat;
+
+            string h = args.Get("horizontalAlignment", "").Trim().ToLowerInvariant();
+            if (h == "general") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignGeneral;
+            else if (h == "left") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignLeft;
+            else if (h == "center") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignCenter;
+            else if (h == "right") target.HorizontalAlignment = Excel.XlHAlign.xlHAlignRight;
+
+            string v = args.Get("verticalAlignment", "").Trim().ToLowerInvariant();
+            if (v == "top") target.VerticalAlignment = Excel.XlVAlign.xlVAlignTop;
+            else if (v == "center") target.VerticalAlignment = Excel.XlVAlign.xlVAlignCenter;
+            else if (v == "bottom") target.VerticalAlignment = Excel.XlVAlign.xlVAlignBottom;
+
+            string border = args.Get("border", "").Trim().ToLowerInvariant();
+            if (border == "none")
+                target.Borders.LineStyle = Excel.XlLineStyle.xlLineStyleNone;
+            else if (border == "thin")
+            {
+                target.Borders.LineStyle = Excel.XlLineStyle.xlContinuous;
+                target.Borders.Weight = Excel.XlBorderWeight.xlThin;
+            }
+
+            if (bool.TryParse(args.Get("autofitColumns", ""), out value) && value) target.Columns.AutoFit();
+            if (bool.TryParse(args.Get("autofitRows", ""), out value) && value) target.Rows.AutoFit();
         }
 
         private static long GetCellCount(Excel.Range target)
