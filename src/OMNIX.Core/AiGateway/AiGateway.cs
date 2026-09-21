@@ -87,6 +87,50 @@ namespace OMNIX.Core.AiGateway
             ChatResponse final = null;
             bool accessClarified = false;
             bool writeAttempted = false;
+            bool writeSucceeded = false;
+            bool lastWriteVerified = true;
+            int mutationRepairCount = 0;
+            int toolRepairCount = 0;
+            int verificationRepairCount = 0;
+            bool mutationRequired = MutationIntentDetector.LikelyMutation(
+                request != null && request.UserTurn != null ? request.UserTurn.Text : null, hostAdapter);
+
+            // Deterministic read-only preflight for actual Office mutation requests. The model no
+            // longer gets to invent "no write access" without measured host state.
+            if (mutationRequired && toolExecutor != null && hostAdapter != null && current != null)
+            {
+                try
+                {
+                    var access = await toolExecutor.ExecuteAsync(
+                        new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" },
+                        hostAdapter).ConfigureAwait(true);
+
+                    string mapText = "";
+                    if (hostAdapter is IIndexedHostAdapter)
+                    {
+                        var map = await toolExecutor.ExecuteAsync(
+                            new ToolCall { Name = ToolNames.ReadDocumentMap, ArgumentsJson = "{\"offset\":0}" },
+                            hostAdapter).ConfigureAwait(true);
+                        mapText = "\nOMNIX DOCUMENT MAP PREFLIGHT: " + map.ContentForModel;
+                    }
+
+                    current = new ChatTurn
+                    {
+                        Role = current.Role,
+                        Text = (current.Text ?? "") +
+                               "\n\nOMNIX RUNTIME PREFLIGHT (measured, read-only): " + access.ContentForModel + mapText +
+                               "\nThe user requested a real Office change. Use a documented native tool/capability; do not substitute manual instructions or code unless a measured blocker prevents execution.",
+                        Images = current.Images,
+                        TimestampUtc = current.TimestampUtc
+                    };
+                    Logger.Gateway("Tool runtime preflight completed; mutationRequired=True; host=" + hostAdapter.HostDisplayName);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("gateway", "Mutation preflight failed; provider will receive normal host context.", ex);
+                }
+            }
+
             for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 // Refresh the Office runtime envelope before EVERY provider turn. A previous tool
@@ -107,7 +151,8 @@ namespace OMNIX.Core.AiGateway
                 {
                     SystemPrompt = liveSystemPrompt,
                     History = history,
-                    UserTurn = current
+                    UserTurn = current,
+                    Tools = ToolSchemaCatalog.ForHost(hostAdapter)
                 };
 
                 IProviderAdapter provider = _router.Resolve(SettingsManager.Instance.Settings.SelectedProviderId, req.HasImages);
