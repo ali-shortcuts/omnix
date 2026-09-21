@@ -25,6 +25,12 @@ already verified replacement for a database designer/accountant.
   and charts. Bounded reads can inspect individual shape text, table cells,
   grouped-item metadata and speaker notes. Pixel-only appearance still requires
   slide capture.
+- Excel `format_range`: one bounded contiguous range can be professionally formatted after
+  explicit preview/confirmation: font name/size/emphasis/color, fill color, horizontal/vertical
+  alignment, number format, wrap text, thin/no border, and row/column AutoFit. The actual range is
+  brought into view in Excel; formatting is performed through the Excel Object Model.
+- Excel `write_to_cell` preserves JSON numbers and booleans as real Excel values while literal
+  strings remain text.
 - Excel `create_data_table`: one new named worksheet with a styled table, up to
   24 columns/50 data rows and a 32000-character plan. Each write is previewed.
   Existing sheets are never overwritten; `uniqueName=true` can bind a fresh
