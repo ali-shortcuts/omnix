@@ -42,7 +42,7 @@ namespace OMNIX.Core.AiGateway
             _localAvailability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             ApplyOfficialMetadata();
             var names = new Dictionary<string, string> {
-                { "custom", "Custom" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
+                { "custom", "Custom Provider" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
                 { "openrouter", "OpenRouter" }, { "mistral", "Mistral" },
                 { "huggingface", "Hugging Face" }, { "cerebras", "Cerebras" },
                 { "ollama", "Ollama" }, { "lmstudio", "LM Studio" }

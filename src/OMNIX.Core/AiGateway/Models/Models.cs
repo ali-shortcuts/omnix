@@ -67,7 +67,7 @@ namespace OMNIX.Core.AiGateway
         private const int MaxCurrentImages = 4;
         private const int MaxImageBytes = 20 * 1024 * 1024;
         private const int MaxCurrentImageBytesTotal = 24 * 1024 * 1024;
-        private const int RecentHistoryTurns = 12;
+        private const int RecentHistoryTurns = 20;
         private const int MaxContinuityTerms = 48;
         private const string HistoricalImageMarker = "\n[OMNIX: an earlier image was omitted from provider replay to keep request memory bounded; ask the user to reattach it if visual inspection is required.]";
 
@@ -299,7 +299,8 @@ namespace OMNIX.Core.AiGateway
         private static bool ContainsInternalToolProtocol(string text)
         {
             if (string.IsNullOrEmpty(text)) return false;
-            return text.IndexOf("```omnix_tool", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            return text.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   text.IndexOf("```omnix_tool", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    text.IndexOf("OMNIX TOOL RESULT:", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 

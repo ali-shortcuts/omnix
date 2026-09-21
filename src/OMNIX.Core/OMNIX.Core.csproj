@@ -130,8 +130,10 @@
     <Compile Include="Ui\OfficeUi.cs" />
     <Compile Include="AiGateway\Adapters\CompatiblePresetAdapter.cs" />
     <Compile Include="Util\Utils.cs" />
+    <Compile Include="Reference\OfficeReference.cs" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Reference\ExcelFunctions.json"><LogicalName>OMNIX.ExcelFunctions.json</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Localization\Strings.xaml"><LogicalName>OMNIX.Core.Localization.Strings.source.xaml</LogicalName></EmbeddedResource>
     <Page Include="Localization\Strings.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>
     <Page Include="Theming\Themes\Dark.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>

@@ -21,6 +21,10 @@ namespace OMNIX.Core.Tools
     public sealed class ToolExecutor
     {
         /// <summary>UI wires this: returns true when the user confirmed the change.</summary>
+        public Func<string, string> ConversationSearch { get; set; }
+
+        public Action<string> Progress { get; set; }
+
         public Func<WritePreview, Task<bool>> WriteConfirmation { get; set; }
 
         /// <summary>
@@ -61,9 +65,12 @@ namespace OMNIX.Core.Tools
             try
             {
                 EnsureRequestScope(ct);
-                if (ToolNames.IsWriteTool(call.Name))
-                    return await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true);
-                return ExecuteRead(call, adapter, ct);
+                ReportProgress("Running: " + call.Name);
+                ToolResult result = ToolNames.IsWriteTool(call.Name)
+                    ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
+                    : ExecuteRead(call, adapter, ct);
+                ReportProgress((result.Success ? "Completed: " : "Failed: ") + call.Name);
+                return result;
             }
             catch (OperationCanceledException)
             {
@@ -80,6 +87,12 @@ namespace OMNIX.Core.Tools
                 Logger.Error("gateway", "Tool execution failed: " + call.Name, ex);
                 return ToolResult.Fail("TOOL ERROR: " + ex.Message);
             }
+        }
+
+        private void ReportProgress(string message)
+        {
+            try { if (Progress != null) Progress(message); }
+            catch { /* Display failures must not interrupt Office operations. */ }
         }
 
         private void EnsureRequestScope(CancellationToken ct)
@@ -102,6 +115,15 @@ namespace OMNIX.Core.Tools
 
             switch (call.Name)
             {
+                case ToolNames.SearchConversation:
+                    return ConversationSearch != null
+                        ? ToolResult.Ok(ConversationSearch(ToolArguments.Parse(call.ArgumentsJson).Get("query", "")))
+                        : ToolResult.Fail("Conversation search is unavailable in this workspace.");
+                case ToolNames.SearchOfficeReference:
+                {
+                    var args = ToolArguments.Parse(call.ArgumentsJson);
+                    return ToolResult.Ok(Reference.OfficeReference.Search(args.Get("host", adapter.HostDisplayName), args.Get("query", ""), args.Integer("offset", 0, 0, 10000)));
+                }
                 case ToolNames.ReadDocumentMap:
                 case ToolNames.ReadDocumentSection:
                 {

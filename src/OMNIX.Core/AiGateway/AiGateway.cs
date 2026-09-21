@@ -350,6 +350,8 @@ namespace OMNIX.Core.AiGateway
             _pending.Append(delta);
             string text = _pending.ToString();
             int markerIndex = text.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
+            int xmlIndex = text.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase);
+            if (xmlIndex >= 0 && (markerIndex < 0 || xmlIndex < markerIndex)) markerIndex = xmlIndex;
             if (markerIndex >= 0)
             {
                 Emit(text.Substring(0, markerIndex));
@@ -422,6 +424,8 @@ namespace OMNIX.Core.AiGateway
             sb.AppendLine("```omnix_tool");
             sb.AppendLine("{\"tool\":\"<name>\",\"args\":{...}}");
             sb.AppendLine("```");
+            sb.AppendLine("Conversation memory: search_conversation {query} searches the saved turns loaded for this document. Recent history is bounded; search earlier decisions when needed. Results are excerpts, not unlimited memory.");
+            sb.AppendLine("Reference tool: search_office_reference {host:Excel|Word|PowerPoint,query,offset:0}. Returns educational names/links, not additional execution powers. Use numeric JSON values for numbers when creating tables. Complete requested steps using available tools; do not repeatedly ask for details that can reasonably be inferred. Never claim a write succeeded until its tool result confirms success, and read back changes for verification.");
             sb.AppendLine("Read-only tools: read_selection, read_document, capture_current_view_as_image.");
             if (hostAdapter is IIndexedHostAdapter)
             {
@@ -438,7 +442,7 @@ namespace OMNIX.Core.AiGateway
             sb.AppendLine("A visual capture is bounded: analyze only what is visible in that captured image and do not claim to see other pages, sheets, cells or slides.");
             sb.AppendLine("Write tools always require a user preview and confirmation. Available only in the active host:");
             if (hostAdapter != null && hostAdapter.Host == HostType.Excel)
-                sb.AppendLine("Excel: write_to_cell {address,value}, insert_formula {address,formula}, highlight_range {address}; capture_chart_as_image {chart} for reading a chart. create_data_table {sheet,headers:[text],rows:[[value,...]]} creates ONE NEW sheet/table: 1–24 unique headers, 0–50 rows, <=512 cells including headers, <=32000 argument characters, each cell <=500 characters. Never overwrites sheets; strings remain literal data, not formulas. New sheets cannot be assumed undoable with Ctrl+Z; delete the new sheet to reverse. Empty rows creates one blank input row. This does not implement relationships, foreign keys or database transactions.");
+                sb.AppendLine("Excel: write_to_cell {sheet,address,value}, insert_formula {sheet,address,formula}, highlight_range {sheet,address} (sheet optional; defaults to active worksheet); capture_chart_as_image {chart} for reading a chart. create_data_table {sheet,headers:[text],rows:[[value,...]]} creates ONE NEW sheet/table: 1–24 unique headers, 0–50 rows, <=512 cells including headers, <=32000 argument characters, each cell <=500 characters. Never overwrites sheets; strings remain literal data, not formulas. New sheets cannot be assumed undoable with Ctrl+Z; delete the new sheet to reverse. Empty rows creates one blank input row. This does not implement relationships, foreign keys or database transactions.");
             else if (hostAdapter != null && hostAdapter.Host == HostType.Word)
                 sb.AppendLine("Word: rewrite_selected_text {text}.");
             else if (hostAdapter != null)

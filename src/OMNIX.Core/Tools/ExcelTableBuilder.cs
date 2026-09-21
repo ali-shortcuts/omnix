@@ -86,6 +86,7 @@ namespace OMNIX.Core.Tools
             var wb = CheckTarget(app, plan);
             var headers = (JArray)plan["headers"]; var rows = (JArray)plan["rows"];
             Excel.Worksheet created = null;
+            bool completed = false;
             bool events = app.EnableEvents;
             object previousSheet = app.ActiveSheet;
             try
@@ -111,7 +112,9 @@ namespace OMNIX.Core.Tools
                 var table = created.ListObjects.Add(Excel.XlListObjectSourceType.xlSrcRange, area,
                     Type.Missing, Excel.XlYesNoGuess.xlYes, Type.Missing);
                 table.TableStyle = "TableStyleMedium2";
-                area.Columns.ColumnWidth = 18;
+                area.Columns.ColumnWidth = 20;
+                created.Range["A1"].Resize[1, headers.Count].WrapText = true;
+                created.Range["A1"].Resize[1, headers.Count].EntireRow.AutoFit();
                 for (int y = 0; y < rows.Count; y++) for (int c = 0; c < headers.Count; c++)
                 {
                     var cell = (Excel.Range)created.Cells[y+2,c+1]; var expected = rows[y][c];
@@ -128,6 +131,7 @@ namespace OMNIX.Core.Tools
                 for (int c = 0; c < headers.Count; c++)
                     if (Convert.ToString(((Excel.Range)created.Cells[1,c+1]).Value2) != (string)headers[c])
                         throw new InvalidOperationException("Table header verification failed.");
+                completed = true;
             }
             catch (Exception failure)
             {
@@ -144,7 +148,8 @@ namespace OMNIX.Core.Tools
             {
                 try {
                     var ws = previousSheet as Excel.Worksheet; var chart = previousSheet as Excel.Chart;
-                    if (ws != null) ws.Activate(); else if (chart != null) chart.Activate();
+                    if (completed && created != null) { created.Activate(); created.Range["A1"].Select(); }
+                    else if (ws != null) ws.Activate(); else if (chart != null) chart.Activate();
                 } finally { app.EnableEvents = events; }
             }
         }

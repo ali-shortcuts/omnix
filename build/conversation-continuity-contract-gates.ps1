@@ -43,7 +43,7 @@ Require $modelPath 'Images = null' 'historical image bytes must remain excluded 
 Require $modelPath 'HistoricalImageMarker' 'omitted historical images must remain explicit to the model.'
 
 # Continuity behavior: recent tail + first user anchor + relevant older turns, then chronological replay.
-Require $modelPath 'RecentHistoryTurns = 12' 'a bounded recent tail must be retained.'
+Require $modelPath 'RecentHistoryTurns = 20' 'a bounded recent tail must be retained.'
 Require $modelPath 'continuityCharReserve' 'continuity anchors need a bounded reserve instead of consuming recent context.'
 Require $modelPath 'maxChars / 4' 'continuity reserve must stay a bounded fraction of history budget.'
 Require $modelPath 'FindFirstUserIndex' 'the first meaningful user goal must be eligible as a stable anchor.'

@@ -19,6 +19,7 @@ namespace OMNIX.Core.Ui
     {
         private WorkspaceController _controller;
         private ImageAttachment _pendingImage;
+        private bool _busy;
 
         public ChatView()
         {
@@ -42,6 +43,7 @@ namespace OMNIX.Core.Ui
 
         public void ReloadMessages(IEnumerable<ChatTurn> turns)
         {
+            TranscriptBox.Text = _controller != null ? _controller.ConversationText() : "";
             MessagesPanel.Children.Clear();
             foreach (var t in turns)
             {
@@ -61,6 +63,7 @@ namespace OMNIX.Core.Ui
 
         public void SetBusy(bool busy)
         {
+            _busy = busy;
             SendButton.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
             StopButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             NewChatButton.IsEnabled = !busy;
@@ -144,9 +147,35 @@ namespace OMNIX.Core.Ui
             if (_controller != null) _controller.NewChat();
         }
 
+        private void OnTranscript(object sender, RoutedEventArgs e)
+        {
+            bool show = TranscriptBox.Visibility != Visibility.Visible;
+            TranscriptBox.Text = _controller != null ? _controller.ConversationText() : "";
+            TranscriptBox.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            MessagesScroll.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+            if (show) TranscriptBox.Focus();
+        }
+
+        private void OnImportText(object sender, RoutedEventArgs e)
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Text files (*.txt)|*.txt", Multiselect = false };
+            if (picker.ShowDialog() != true) return;
+            try
+            {
+                if (new System.IO.FileInfo(picker.FileName).Length > 262144)
+                { ShowError("Text file is too large. Split it into smaller files."); return; }
+                string content = System.IO.File.ReadAllText(picker.FileName, new System.Text.UTF8Encoding(false, true));
+                if (InputBox.Text.Length + content.Length > 65536)
+                { ShowError("Combined text exceeds 65,536 characters. Nothing was removed."); return; }
+                InputBox.AppendText(content);
+                InputBox.Focus();
+            }
+            catch { ShowError("Could not read this text file. Use UTF-8 text."); }
+        }
+
         private void OnCopy(object sender, RoutedEventArgs e)
         {
-            if (_controller != null) _controller.CopyLastAnswer();
+            if (_controller != null) _controller.CopyConversation();
         }
 
         private void OnRetry(object sender, RoutedEventArgs e)
@@ -180,8 +209,14 @@ namespace OMNIX.Core.Ui
 
         private void Send()
         {
-            if (_controller == null) return;
+            if (_controller == null || _busy) return;
             string text = InputBox.Text;
+            if (string.IsNullOrWhiteSpace(text) && _pendingImage == null) return;
+            if (text.Length > 64 * 1024)
+            {
+                ShowError("Message exceeds 65,536 characters. Your draft has been preserved; split it into smaller messages.");
+                return;
+            }
             InputBox.Clear();
             var image = _pendingImage;
             SetPendingImage(null);
