@@ -99,10 +99,18 @@ namespace OMNIX.Core.AiGateway
             int mutationRepairTurns = 0;
             int protocolRepairTurns = 0;
             bool mutationRequested = MutationIntentDetector.IsLikelyMutation(request.UserTurn != null ? request.UserTurn.Text : null);
+            RuntimeDiagnosticJournal.BeginRequest(
+                hostAdapter != null ? hostAdapter.HostDisplayName : "none",
+                mutationRequested,
+                request.UserTurn != null && request.UserTurn.Text != null ? request.UserTurn.Text.Length : 0,
+                request.History != null ? request.History.Count : 0,
+                request.HasImages);
             string runtimePreflight = "";
 
             if (mutationRequested && hostAdapter != null && toolExecutor != null)
             {
+                long preflightTimer = RuntimeDiagnosticJournal.StartTimer();
+                RuntimeDiagnosticJournal.Event("preflight_start", null, "start", null, null, null);
                 try
                 {
                     var access = await toolExecutor.ExecuteAsync(
@@ -119,10 +127,21 @@ namespace OMNIX.Core.AiGateway
                         "The original user request requires actual Office mutation. A text-only answer is not completion.";
                     Logger.Gateway("Mutation preflight completed; accessSuccess=" + (access != null && access.Success) +
                                    "; mapSuccess=" + (map != null && map.Success));
+                    RuntimeDiagnosticJournal.Event(
+                        "preflight_complete", null,
+                        (access != null && access.Success && map != null && map.Success) ? "success" : "partial",
+                        RuntimeDiagnosticJournal.ElapsedMs(preflightTimer), null,
+                        "access=" + (access != null && access.Success) + "; map=" + (map != null && map.Success));
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException)
+                {
+                    RuntimeDiagnosticJournal.AbandonRequest("cancelled_preflight", null);
+                    throw;
+                }
                 catch (Exception ex)
                 {
+                    RuntimeDiagnosticJournal.Event("preflight_error", null, "failed",
+                        RuntimeDiagnosticJournal.ElapsedMs(preflightTimer), null, "type=" + ex.GetType().Name);
                     Logger.Error("gateway", "Mutation preflight failed; provider may still inspect with normal tools.", ex);
                     runtimePreflight =
                         "OMNIX RUNTIME PREFLIGHT: mutation requested, but automatic preflight could not complete. " +
@@ -158,7 +177,11 @@ namespace OMNIX.Core.AiGateway
                 };
 
                 IProviderAdapter provider = _router.Resolve(SettingsManager.Instance.Settings.SelectedProviderId, req.HasImages);
-                provider.Configure(_router.BuildCredentials(provider.Info.Id));
+                ProviderCredentials providerCredentials = _router.BuildCredentials(provider.Info.Id);
+                provider.Configure(providerCredentials);
+                RuntimeDiagnosticJournal.SetProvider(provider.Info.Id, providerCredentials != null ? providerCredentials.Model : null);
+                RuntimeDiagnosticJournal.Event("provider_round", null, "resolved", null, null,
+                    "round=" + (round + 1) + "; nativeTools=" + req.UseNativeTools + "; images=" + req.HasImages);
 
                 if (req.HasImages && !provider.SupportsVisionNow())
                     throw new OmnixException(ErrorCode.MODEL_ERROR,
@@ -188,17 +211,26 @@ namespace OMNIX.Core.AiGateway
                 ChatResponse response;
                 var visibleDelta = new ToolProtocolDeltaFilter(onDelta);
                 var sw = Stopwatch.StartNew();
+                RuntimeDiagnosticJournal.Event("provider_call_start", null, "start", null, null,
+                    "round=" + (round + 1) + "; historyTurns=" + history.Count +
+                    "; currentChars=" + (current != null && current.Text != null ? current.Text.Length : 0));
                 try
                 {
                     response = await RetryPolicy.ExecuteWithRetryAsync(
                         innerCt => provider.SendAsync(req, visibleDelta.OnDelta, innerCt), ct).ConfigureAwait(true);
                     sw.Stop();
                     _health.RecordSuccess(provider.Info.Id, sw.ElapsedMilliseconds);
+                    RuntimeDiagnosticJournal.Event("provider_call_end", null, "success", sw.ElapsedMilliseconds, null,
+                        "round=" + (round + 1) +
+                        "; responseChars=" + (response != null && response.Text != null ? response.Text.Length : 0) +
+                        "; toolCalls=" + (response != null && response.ToolCalls != null ? response.ToolCalls.Count : 0));
                 }
                 catch (OmnixException ex)
                 {
                     sw.Stop();
                     _health.RecordFailure(provider.Info.Id, ex);
+                    RuntimeDiagnosticJournal.Event("provider_call_end", null, "error", sw.ElapsedMilliseconds, ex.Code,
+                        "round=" + (round + 1));
                     if (ShouldSuggestAlternative(ex))
                         SuggestAlternative(provider, req.HasImages, "request_failure_" + ex.Code);
                     throw;
