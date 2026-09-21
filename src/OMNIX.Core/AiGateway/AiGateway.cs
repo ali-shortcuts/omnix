@@ -330,7 +330,14 @@ namespace OMNIX.Core.AiGateway
     /// </summary>
     internal sealed class ToolProtocolDeltaFilter
     {
-        private const string Marker = "```omnix_tool";
+        private static readonly string[] Markers =
+        {
+            "```omnix_tool",
+            "<tool_call>",
+            "<|tool_call_start|>"
+        };
+        private static readonly int Holdback = Markers.Max(m => m.Length) - 1;
+
         private readonly Action<string> _sink;
         private readonly StringBuilder _pending = new StringBuilder();
         private bool _suppress;
@@ -349,9 +356,7 @@ namespace OMNIX.Core.AiGateway
 
             _pending.Append(delta);
             string text = _pending.ToString();
-            int markerIndex = text.IndexOf(Marker, StringComparison.OrdinalIgnoreCase);
-            int xmlIndex = text.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase);
-            if (xmlIndex >= 0 && (markerIndex < 0 || xmlIndex < markerIndex)) markerIndex = xmlIndex;
+            int markerIndex = FirstMarkerIndex(text);
             if (markerIndex >= 0)
             {
                 Emit(text.Substring(0, markerIndex));
@@ -360,8 +365,9 @@ namespace OMNIX.Core.AiGateway
                 return;
             }
 
-            // Hold only Marker.Length-1 chars, enough to catch a marker split across HTTP chunks.
-            int safeLength = _pending.Length - (Marker.Length - 1);
+            // Hold enough trailing characters to detect any supported marker split across
+            // HTTP/SSE chunks. This includes provider-native <|tool_call_start|> tokens.
+            int safeLength = _pending.Length - Holdback;
             if (safeLength > 0)
             {
                 string safe = _pending.ToString(0, safeLength);
@@ -391,6 +397,17 @@ namespace OMNIX.Core.AiGateway
                 }
             }
             _pending.Clear();
+        }
+
+        private static int FirstMarkerIndex(string text)
+        {
+            int best = -1;
+            foreach (string marker in Markers)
+            {
+                int idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+            }
+            return best;
         }
 
         private void Emit(string text)
