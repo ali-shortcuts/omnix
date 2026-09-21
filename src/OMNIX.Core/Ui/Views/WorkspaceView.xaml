@@ -119,11 +119,25 @@
             <local:SettingsView x:Name="SettingsPage" Visibility="Collapsed" />
             <DockPanel x:Name="LearnPage" Visibility="Collapsed" Margin="8">
                 <StackPanel DockPanel.Dock="Top">
-                    <ComboBox x:Name="ReferenceHost" SelectedIndex="0" SelectionChanged="ReferenceChanged">
-                        <ComboBoxItem Content="Excel" /><ComboBoxItem Content="Word" /><ComboBoxItem Content="PowerPoint" />
-                    </ComboBox>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ReferenceHost" Grid.Column="0" SelectedIndex="0" SelectionChanged="ReferenceChanged">
+                            <ComboBoxItem Content="Excel" /><ComboBoxItem Content="Word" /><ComboBoxItem Content="PowerPoint" />
+                        </ComboBox>
+                        <ComboBox x:Name="ReferenceLanguage" Grid.Column="1" SelectedIndex="0"
+                                  SelectionChanged="ReferenceChanged" Margin="6,0,0,0" MinWidth="82">
+                            <ComboBoxItem Content="English" Tag="en" />
+                            <ComboBoxItem Content="فارسی" Tag="fa" />
+                        </ComboBox>
+                    </Grid>
                     <TextBox x:Name="ReferenceQuery" TextChanged="ReferenceChanged" ToolTip="Search function name" Margin="0,6" />
-                    <WrapPanel><Button Content="Previous" Click="ReferencePrevious" /><Button Content="Next" Click="ReferenceNext" Margin="6,0" /></WrapPanel>
+                    <WrapPanel>
+                        <Button x:Name="ReferencePreviousButton" Content="Previous" Click="ReferencePrevious" />
+                        <Button x:Name="ReferenceNextButton" Content="Next" Click="ReferenceNext" Margin="6,0" />
+                    </WrapPanel>
                 </StackPanel>
                 <TextBox x:Name="ReferenceText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                          Background="{DynamicResource B.Background}" Foreground="{DynamicResource B.Foreground}" BorderThickness="0" />
