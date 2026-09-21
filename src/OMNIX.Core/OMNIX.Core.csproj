@@ -120,6 +120,7 @@
     <Compile Include="Tools\ToolExecutor.cs" />
     <Compile Include="Tools\ExcelTableBuilder.cs" />
     <Compile Include="Tools\Tools.cs" />
+    <Compile Include="Tools\ToolSchemaCatalog.cs" />
     <Compile Include="Ui\ChatBubble.cs" />
     <Compile Include="Ui\Dialogs\OmnixDialogs.cs" />
     <Compile Include="Ui\Markdown\MarkdownRenderer.cs" />
