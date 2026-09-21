@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using OMNIX.Core.Tools;
+using Office = Microsoft.Office.Core;
 
 namespace OMNIX.Core.Context
 {
@@ -13,6 +14,35 @@ namespace OMNIX.Core.Context
     {
         string ReadDocumentMap(int offset);
         string ReadDocumentSection(ToolArguments arguments);
+    }
+
+
+    /// <summary>
+    /// Visible execution is deliberately separate from chat status text. Implementations move the
+    /// real Office UI to the object being inspected/changed and may activate the relevant native
+    /// Ribbon tab. They must never simulate a click for a command that was not actually invoked.
+    /// </summary>
+    public enum OfficeExecutionStage
+    {
+        Inspect,
+        Preview,
+        Apply,
+        Verify
+    }
+
+    public interface IVisibleOfficeExecutionHost
+    {
+        /// <summary>Called by the host Ribbon once Office has supplied its real IRibbonUI instance.</summary>
+        void BindRibbon(Office.IRibbonUI ribbonUi);
+
+        /// <summary>
+        /// Bring the actual target into view: workbook/sheet/range, Word range, or slide/shape.
+        /// This is presentation of the real operation, not an animation in the OMNIX chat pane.
+        /// </summary>
+        void RevealOperation(string toolName, ToolArguments arguments, OfficeExecutionStage stage);
+
+        /// <summary>Truthful summary of executable host capabilities exposed to the current model.</summary>
+        string CapabilitySummary { get; }
     }
 
     public interface IHostAdapter
