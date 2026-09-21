@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using OMNIX.Core.AiGateway.Adapters;
 using OMNIX.Core.Context;
 using OMNIX.Core.ContextLimiter;
@@ -447,6 +448,95 @@ namespace OMNIX.Core.AiGateway
             return new ChatResponse { Text = "OMNIX reached the bounded multi-step limit for this request. The work may be incomplete. Ask to continue; re-read the document state before applying more changes." };
         }
 
+        private static bool TryValidateToolArguments(string json, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(json)) return true;
+            if (json.Length > 64 * 1024)
+            {
+                error = "arguments_too_large";
+                return false;
+            }
+            if (string.Equals(json, "__MALFORMED_NATIVE_TOOL_ARGUMENTS__", StringComparison.Ordinal))
+            {
+                error = "provider_native_arguments_malformed";
+                return false;
+            }
+            try
+            {
+                JObject.Parse(json);
+                return true;
+            }
+            catch
+            {
+                error = "arguments_not_json_object";
+                return false;
+            }
+        }
+
+        private static ChatTurn MutationRepairTurn(string runtimePreflight, string reason)
+        {
+            return new ChatTurn
+            {
+                Role = ChatRole.User,
+                TimestampUtc = DateTime.UtcNow,
+                Text = "OMNIX RUNTIME MUTATION REQUIRED: " + reason +
+                       "\nThe user's original request requires an actual change inside the active Office document. " +
+                       "Invoke exactly ONE appropriate OMNIX write tool now. You may use a read tool first only when required to target the change correctly. " +
+                       "Do not answer with a manual table, VBA, generic instructions, or an invented permission limitation. " +
+                       "A task is complete only after a write tool succeeds and the affected Office state is verified." +
+                       (string.IsNullOrWhiteSpace(runtimePreflight) ? "" :
+                           "\nMeasured preflight: " + SafeRuntimeSummary(runtimePreflight, 2600))
+            };
+        }
+
+        private static ChatTurn ProtocolRepairTurn(string instruction)
+        {
+            return new ChatTurn
+            {
+                Role = ChatRole.User,
+                TimestampUtc = DateTime.UtcNow,
+                Text = "OMNIX RUNTIME TOOL-PROTOCOL REPAIR: " + instruction +
+                       "\nReturn one valid approved tool call. Do not claim success until its result is returned."
+            };
+        }
+
+        private static ChatResponse MutationRuntimeFailure(string message)
+        {
+            return new ChatResponse
+            {
+                Text = "OMNIX runtime stopped safely: " + message,
+                Model = null
+            };
+        }
+
+        private static string SafeAssistantTrace(ChatResponse response, string fallback)
+        {
+            string text = response != null ? response.Text : null;
+            if (string.IsNullOrWhiteSpace(text)) return fallback ?? "[No assistant text]";
+            return text.Length <= 6000 ? text : text.Substring(0, 6000) + "\n[OMNIX: assistant trace truncated]";
+        }
+
+        private static string SafeRuntimeSummary(string value, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "(none)";
+            string text = value.Replace("\0", "");
+            return text.Length <= maxChars ? text : text.Substring(0, maxChars) + "…";
+        }
+
+        private static string SafeToolName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "(empty)";
+            var sb = new StringBuilder();
+            foreach (char ch in value.Trim())
+            {
+                if (sb.Length >= 80) break;
+                if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.' || ch == ':' || ch == '/')
+                    sb.Append(ch);
+            }
+            return sb.Length == 0 ? "(invalid)" : sb.ToString();
+        }
+
         private bool ShouldSuggestAlternative(OmnixException ex)
         {
             if (ex == null) return false;
@@ -567,6 +657,44 @@ namespace OMNIX.Core.AiGateway
             return SystemPromptBuilder.Build(hostAdapter, context);
         }
     }
+
+    internal static class MutationIntentDetector
+    {
+        private static readonly string[] NegativeMarkers =
+        {
+            "do not create", "don't create", "do not edit", "don't edit", "do not change",
+            "don't change", "do not write", "don't write", "do not delete", "don't delete",
+            "نساز", "ایجاد نکن", "تغییر نده", "ویرایش نکن", "حذف نکن", "ننویس"
+        };
+
+        private static readonly string[] MutationMarkers =
+        {
+            " create ", " build ", " make ", " add ", " insert ", " write ", " edit ", " update ",
+            " change ", " delete ", " remove ", " format ", " rename ", " sort ", " filter ",
+            " merge ", " generate ", " construct ", " fill ", " populate ",
+            "بساز", "ساخته", "ایجاد کن", "ایجاد شود", "اضافه کن", "وارد کن", "بنویس",
+            "ویرایش کن", "تغییر بده", "تغییر کن", "حذف کن", "فرمت کن", "مرتب کن",
+            "نام‌گذاری", "نامگذاری", "پر کن", "فورمول", "فرمول", "شیت بساز", "جدول بساز",
+            "دیتابیس بساز", "گزارش بساز"
+        };
+
+        public static bool IsLikelyMutation(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string normalized = " " + text.Replace('ي', 'ی').Replace('ك', 'ک').ToLowerInvariant() + " ";
+
+            foreach (string marker in NegativeMarkers)
+                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return false;
+
+            foreach (string marker in MutationMarkers)
+                if (normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+
+            return false;
+        }
+    }
+
 
     /// <summary>
     /// Streaming protocol filter. It preserves ordinary token streaming while holding a tiny suffix
