@@ -299,7 +299,8 @@ namespace OMNIX.Core.AiGateway
         private static bool ContainsInternalToolProtocol(string text)
         {
             if (string.IsNullOrEmpty(text)) return false;
-            return text.IndexOf("```omnix_tool", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            return text.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   text.IndexOf("```omnix_tool", StringComparison.OrdinalIgnoreCase) >= 0 ||
                    text.IndexOf("OMNIX TOOL RESULT:", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 

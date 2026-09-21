@@ -61,7 +61,7 @@ class WorkspaceStartupRegression {
             provider.ItemsSource=new ProviderRegistry().All.Select(p=>p.Info).ToList();
             provider.DisplayMemberPath="DisplayName";
             provider.SelectedIndex=0;
-            Check(provider.SelectedItem.ToString()=="Custom","Provider selected label must display its name");
+            Check(provider.SelectedItem.ToString()=="Custom Provider","Provider selected label must display its name");
             var model=(ComboBox)settings.FindName("ModelCombo");
             model.ItemsSource=new[]{"model-one", "model-two-with-a-long-name"};
             foreach (string name in new[]{"ProviderCombo","ModelCombo","ThemeCombo","LanguageCombo"}) {

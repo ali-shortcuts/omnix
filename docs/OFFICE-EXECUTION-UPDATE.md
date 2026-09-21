@@ -11,6 +11,8 @@
 - Save reports storage failure and returns to Chat only after successful persistence.
 - Learn page with separate Excel/Word/PowerPoint selections and model-accessible reference search.
 
+- Excel cell writes accept an explicit worksheet name in the active workbook. Formula writes use General format and verify HasFormula; successful table creation leaves the new sheet visible and wraps headers. These COM changes require real Excel validation beyond hosted tests.
+
 ## Reference provenance
 
 The Excel index contains 521 distinct names from 514 nonempty linked entries in Microsoft's alphabetical index, retrieved 2026-09-21. Combined labels (such as FIND/FINDB) are separated; the index label typo BETA.INVn is normalized to BETA.INV. The count is a documentation snapshot, not a promise that every version supports every function. Only names and official links are embedded; no Microsoft descriptions are copied wholesale.

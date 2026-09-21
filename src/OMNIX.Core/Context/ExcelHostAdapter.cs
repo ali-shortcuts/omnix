@@ -513,7 +513,7 @@ namespace OMNIX.Core.Context
         {
             var args = ToolArguments.Parse(argumentsJson);
             string address = NormalizeAddress(args.Get("address", args.Get("range", "")));
-            var ws = RequireWorksheet(adapter, toolName);
+            var ws = RequireWorksheet(adapter, toolName, args.Get("sheet", ""));
             Excel.Range target = ResolveAndValidateTarget(adapter, ws, toolName, address, args);
 
             string before;
@@ -542,7 +542,7 @@ namespace OMNIX.Core.Context
             return new WritePreview
             {
                 ToolName = toolName,
-                Title = "Excel — " + toolName,
+                Title = "Excel — " + ws.Name + " — " + toolName,
                 Before = before,
                 After = after,
                 ArgumentsJson = argumentsJson
@@ -553,7 +553,7 @@ namespace OMNIX.Core.Context
         {
             var args = ToolArguments.Parse(argumentsJson);
             string address = NormalizeAddress(args.Get("address", args.Get("range", "")));
-            var ws = RequireWorksheet(adapter, toolName);
+            var ws = RequireWorksheet(adapter, toolName, args.Get("sheet", ""));
             Excel.Range target = ResolveAndValidateTarget(adapter, ws, toolName, address, args);
 
             switch (toolName)
@@ -562,7 +562,10 @@ namespace OMNIX.Core.Context
                     target.Value2 = args.Get("value", "");
                     break;
                 case ToolNames.InsertFormula:
+                    target.NumberFormat = "General";
                     target.Formula = args.Get("formula", args.Get("value", ""));
+                    if (!Convert.ToBoolean(target.HasFormula))
+                        throw new InvalidOperationException("Excel did not accept this cell as a formula. Inspect the target cell before retrying.");
                     break;
                 case ToolNames.HighlightRange:
                     target.Interior.Color = 0x3BEBFF;
@@ -573,9 +576,15 @@ namespace OMNIX.Core.Context
             Logging.Logger.Install("Excel write tool applied: " + toolName + " -> " + target.Address[false, false]);
         }
 
-        private static Excel.Worksheet RequireWorksheet(ExcelHostAdapter adapter, string toolName)
+        private static Excel.Worksheet RequireWorksheet(ExcelHostAdapter adapter, string toolName, string sheet)
         {
             var ws = adapter.App.ActiveSheet as Excel.Worksheet;
+            if (!string.IsNullOrWhiteSpace(sheet))
+            {
+                var book = adapter.App.ActiveWorkbook;
+                if (book == null) throw new InvalidOperationException("No workbook is active.");
+                ws = book.Worksheets[sheet] as Excel.Worksheet;
+            }
             if (ws == null)
                 throw new OmnixException(ErrorCode.CORE_ERROR, "No worksheet is active.", toolName, "Open a worksheet.");
             return ws;
