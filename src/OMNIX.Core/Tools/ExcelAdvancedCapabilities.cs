@@ -352,7 +352,13 @@ namespace OMNIX.Core.Tools
         {
             var r=Range(wb,a); var sb=new StringBuilder();
             sb.AppendLine("Range="+r.Address[false,false]+"; conditionalFormatCount="+r.FormatConditions.Count);
-            for(int i=1;i<=r.FormatConditions.Count && i<=50;i++){dynamic fc=r.FormatConditions.Item(i); try{sb.AppendLine("rule="+i+"; type="+fc.Type+"; formula1="+fc.Formula1+"; formula2="+fc.Formula2);}catch{sb.AppendLine("rule="+i+"; type="+fc.Type);}}
+            for(int i=1;i<=r.FormatConditions.Count && i<=50;i++)
+            {
+                var fc = r.FormatConditions.Item(i) as Excel.FormatCondition;
+                if(fc==null){sb.AppendLine("rule="+i+"; type=(non-basic rule)");continue;}
+                try{sb.AppendLine("rule="+i+"; type="+fc.Type+"; formula1="+fc.Formula1+"; formula2="+fc.Formula2);}
+                catch{sb.AppendLine("rule="+i+"; type="+fc.Type);}
+            }
             return TextUtil.Truncate(sb.ToString(),MaxText);
         }
 
@@ -421,13 +427,13 @@ namespace OMNIX.Core.Tools
         }
         private static void ConditionalAdd(Excel.Workbook wb,ToolArguments a)
         {
-            var r=Range(wb,a); string type=a.Get("type","formula").ToLowerInvariant(); dynamic fc;
-            if(type=="formula") fc=r.FormatConditions.Add(Excel.XlFormatConditionType.xlExpression,Type.Missing,a.Get("formula1",""));
+            var r=Range(wb,a); string type=a.Get("type","formula").ToLowerInvariant(); Excel.FormatCondition fc;
+            if(type=="formula") fc=(Excel.FormatCondition)r.FormatConditions.Add(Excel.XlFormatConditionType.xlExpression,Type.Missing,a.Get("formula1",""));
             else
             {
                 string op=a.Get("operator","equal").ToLowerInvariant();
                 Excel.XlFormatConditionOperator o=op=="between"?Excel.XlFormatConditionOperator.xlBetween:op=="greater"?Excel.XlFormatConditionOperator.xlGreater:op=="less"?Excel.XlFormatConditionOperator.xlLess:op=="notequal"?Excel.XlFormatConditionOperator.xlNotEqual:Excel.XlFormatConditionOperator.xlEqual;
-                fc=r.FormatConditions.Add(Excel.XlFormatConditionType.xlCellValue,o,a.Get("formula1",""),a.Get("formula2",""));
+                fc=(Excel.FormatCondition)r.FormatConditions.Add(Excel.XlFormatConditionType.xlCellValue,o,a.Get("formula1",""),a.Get("formula2",""));
             }
             string fill=a.Get("fillColor",""); if(fill.Length>0)fc.Interior.Color=Ole(fill); string font=a.Get("fontColor",""); if(font.Length>0)fc.Font.Color=Ole(font);
         }
