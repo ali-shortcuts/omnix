@@ -60,11 +60,13 @@ Settings now treats provider connectivity and model inference as different facts
   sends a chat request and never fails merely because the selected model is unavailable.
 - **Detect models** retrieves the provider-advertised catalog only; discovery is not presented as
   proof that inference works.
-- **Test model** sends one tiny document-free synthetic text request to the exact selected model.
+- **Test model** sends one tiny document-free OMNIX tool-calling probe to the exact selected model.
+  A model that can chat but does not return a valid OMNIX tool call is reported as **TextOnly**, not
+  as fully working for Office execution.
 - **Verify models** tests detected models sequentially with an isolated adapter and per-model timeout,
-  classifying working, access-denied, unavailable, rate/quota-limited, incompatible, timeout and
-  network failures. The user can stop the verification and filter the dropdown to verified-working
-  catalog entries.
+  classifying OMNIX-tool-compatible, text-only, access-denied, unavailable, rate/quota-limited,
+  incompatible, timeout and network failures. The user can stop verification and filter the dropdown
+  to models whose OMNIX tool path was actually verified.
 - Custom-provider 404 on `/models` is reported as a reachable endpoint with unavailable catalog,
   rather than being mislabeled as failure of the selected model.
 
@@ -74,7 +76,7 @@ Settings now treats provider connectivity and model inference as different facts
 OMNIX now exposes a queryable, host-specific Object Model capability catalog through
 `list_office_capabilities` and a single validated mutation boundary
 `execute_office_capability`. The catalog now contains **190 implemented operations**:
-**41 Excel**, **29 Word**, and **19 PowerPoint**, in addition to the existing bounded read,
+**80 Excel**, **61 Word**, and **49 PowerPoint**, in addition to the existing bounded read,
 Vision, table-building, formula, formatting, notes, and slide tools.
 
 The capability engine covers major professional surfaces including worksheet/range/data validation, conditional formatting, workbook/worksheet protection, calculation, outline/grouping,
@@ -87,3 +89,24 @@ This is deliberately **not** an unrestricted Office escape hatch. Arbitrary `Exe
 execution, Trust Center/security changes, shell/registry access, and arbitrary file-system access
 remain unavailable. Every catalogued mutation still goes through document-scope validation,
 preview, explicit user confirmation, real Office Object Model execution, and visible target reveal.
+
+
+## Native provider tool runtime
+
+OMNIX no longer relies only on models reproducing a textual `omnix_tool` block correctly.
+
+- OpenAI-compatible providers receive a real `tools` schema for a single `omnix_tool` function.
+- Anthropic-compatible custom endpoints receive an Anthropic `tools/input_schema` definition.
+- Gemini receives `functionDeclarations` and native `functionCall` responses are parsed.
+- Ollama receives a native tool definition when the local model/runtime supports tools.
+- If a compatible endpoint explicitly rejects the native tool-schema fields with a request-shape
+  error, OMNIX retries that provider turn once using the legacy textual protocol. The whitelist,
+  document scope and write confirmation boundaries do not change.
+- Native/text tool names are conservatively normalized only when they resolve to an existing hard
+  whitelist entry. Multiple parallel calls, malformed argument objects and invented tools fail
+  closed and receive bounded repair turns.
+- Explicit create/edit requests run an authoritative Office preflight. A model may not finish a
+  mutation request as prose-only output before attempting a real write. If bounded repair fails,
+  OMNIX reports a runtime failure instead of fabricating a table, VBA macro or success claim.
+- Gateway diagnostics record response kind, sanitized tool name, whitelist/write classification and
+  success/failure counts. Tool arguments, API keys and Office document content are not logged.
