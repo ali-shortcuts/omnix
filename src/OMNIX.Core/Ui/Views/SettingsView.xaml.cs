@@ -346,7 +346,7 @@ namespace OMNIX.Core.Ui
                 if (!ReferenceEquals(_providerOperation, operation)) return;
                 if (models == null || models.Count == 0)
                 {
-                    TestResultText.Text = "The server returned no model catalog. You can enter a model ID and use Test Connection.";
+                    TestResultText.Text = "The server returned no model catalog. You can enter an exact model ID and use Test model.";
                     return;
                 }
                 string current = EffectiveModelId;
@@ -586,11 +586,14 @@ namespace OMNIX.Core.Ui
                     return _modelVerification.TryGetValue(id, out result) && result.Working;
                 });
 
+            string catalogCurrent = WorkingModelsOnlyCheck.IsChecked == true ? null : current;
             var options = new[] { "Custom Model" }
-                .Concat(ProviderDiagnostics.ModelOptions(source, current))
+                .Concat(ProviderDiagnostics.ModelOptions(source, catalogCurrent))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
             ModelCombo.ItemsSource = options;
+            // The editable text is preserved even if the working-only dropdown hides this ID.
+            // This avoids silently changing the user's configured model.
             ModelCombo.Text = current ?? "";
         }
 
