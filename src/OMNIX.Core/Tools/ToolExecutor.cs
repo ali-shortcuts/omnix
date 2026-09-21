@@ -70,7 +70,7 @@ namespace OMNIX.Core.Tools
                 Logger.Gateway("Tool dispatch: " + call.Name);
                 RuntimeDiagnosticJournal.Event("executor_dispatch", call.Name,
                     ToolNames.IsWriteTool(call.Name) ? "write" : "read", null, null,
-                    "host=" + (adapter != null ? adapter.HostDisplayName : "none"));
+                    "host=" + (adapter != null ? adapter.HostDisplayName : "none") + CapabilityDetail(call));
                 EnsureRequestScope(ct);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
@@ -313,6 +313,25 @@ namespace OMNIX.Core.Tools
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
 
+
+        private static string CapabilityDetail(ToolCall call)
+        {
+            if (call == null || call.Name != ToolNames.ExecuteOfficeCapability) return "";
+            try
+            {
+                string id = ToolArguments.Parse(call.ArgumentsJson).Get("capability", "");
+                if (string.IsNullOrWhiteSpace(id)) return "";
+                var safe = new System.Text.StringBuilder();
+                foreach (char ch in id)
+                {
+                    if (safe.Length >= 100) break;
+                    if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '.')
+                        safe.Append(ch);
+                }
+                return safe.Length == 0 ? "" : "; capability=" + safe.ToString();
+            }
+            catch { return ""; }
+        }
 
         private static void Reveal(IHostAdapter adapter, ToolCall call, OfficeExecutionStage stage)
         {
