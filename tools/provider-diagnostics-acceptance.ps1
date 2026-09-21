@@ -30,13 +30,26 @@ public sealed class DiagnosticAdapter : IProviderAdapter
     public int CatalogReads;
     public bool Empty;
     public bool FailAuth;
+    public bool CatalogWorks;
+    public bool CatalogAuthFailure;
+    public bool CatalogNotFound;
     public ChatRequest Request;
     public ProviderCredentials Credentials;
     public DiagnosticAdapter(ProviderKind kind)
     { Info = new ProviderInfo { Id = "diagnostic-fixture", DisplayName = "Diagnostic fixture", Kind = kind }; }
     public void Configure(ProviderCredentials credentials) { Credentials = credentials; }
     public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct)
-    { CatalogReads++; throw new InvalidOperationException("This server has no model catalog."); }
+    {
+        CatalogReads++;
+        ct.ThrowIfCancellationRequested();
+        if (CatalogAuthFailure)
+            throw OmnixException.Auth("Provider=Diagnostic; HTTP=401; category=authentication_failed; provider_response_body=REDACTED");
+        if (CatalogNotFound)
+            throw OmnixException.Model("Provider=Diagnostic; HTTP=404; category=model_or_endpoint_not_found; provider_response_body=REDACTED");
+        if (!CatalogWorks)
+            throw new InvalidOperationException("This server has no model catalog.");
+        return Task.FromResult((IReadOnlyList<string>)new List<string> { "model-a", "model-b" });
+    }
     public Task<bool> TestConnectionAsync(CancellationToken ct)
     { throw new InvalidOperationException("Legacy catalog test must not run."); }
     public bool SupportsVisionNow() { return false; }
@@ -96,6 +109,27 @@ public static class ProviderDiagnosticsHarness
             adapter = new DiagnosticAdapter(ProviderKind.Cloud);
             ProviderDiagnostics.TestSyntheticModelAsync(adapter, new ProviderCredentials { Model="manual-model" }, CancellationToken.None).GetAwaiter().GetResult();
             checks["ExplicitDiagnosticDoesNotAskDocumentConsent"] = adapter.Sends == 1 && adapter.Request.History == null && adapter.Request.SystemPrompt == null && !adapter.Request.HasImages && adapter.Request.UserTurn.Text == "Reply with OK.";
+            adapter = new DiagnosticAdapter(ProviderKind.Cloud) { CatalogWorks = true };
+            var connection = ProviderDiagnostics.TestConnectionOnlyAsync(
+                adapter,
+                new ProviderCredentials { Model = "must-not-be-used" },
+                CancellationToken.None).GetAwaiter().GetResult();
+            checks["ConnectionTestDoesNotSendInference"] = connection.State == ConnectionDiagnosticState.Connected &&
+                connection.ModelCount == 2 && adapter.CatalogReads == 1 && adapter.Sends == 0 &&
+                adapter.Credentials != null && string.IsNullOrEmpty(adapter.Credentials.Model);
+
+            adapter = new DiagnosticAdapter(ProviderKind.Cloud) { CatalogAuthFailure = true };
+            connection = ProviderDiagnostics.TestConnectionOnlyAsync(
+                adapter, new ProviderCredentials(), CancellationToken.None).GetAwaiter().GetResult();
+            checks["ConnectionAuthFailureClassified"] = connection.State == ConnectionDiagnosticState.AuthenticationFailed &&
+                connection.EndpointReachable && !connection.AuthenticationProven && adapter.Sends == 0;
+
+            adapter = new DiagnosticAdapter(ProviderKind.Cloud) { CatalogNotFound = true };
+            connection = ProviderDiagnostics.TestConnectionOnlyAsync(
+                adapter, new ProviderCredentials(), CancellationToken.None).GetAwaiter().GetResult();
+            checks["ConnectionCatalog404SeparatedFromModelTest"] =
+                connection.State == ConnectionDiagnosticState.ReachableCatalogUnavailable &&
+                connection.EndpointReachable && !connection.ModelCatalogAvailable && adapter.Sends == 0;
             settings.Privacy = PrivacyMode.LocalOnly;
             adapter = new DiagnosticAdapter(ProviderKind.Cloud);
             try { ProviderDiagnostics.TestSyntheticModelAsync(adapter, new ProviderCredentials(), CancellationToken.None).GetAwaiter().GetResult(); checks["ExplicitDiagnosticRespectsLocalOnly"]=false; }
