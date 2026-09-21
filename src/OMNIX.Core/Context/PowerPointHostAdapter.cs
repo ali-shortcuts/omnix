@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -21,6 +21,7 @@ namespace OMNIX.Core.Context
 
         private readonly Ppt.Application _app;
         private readonly Func<int> _maxChars;
+        private Office.IRibbonUI _ribbonUi;
 
         public PowerPointHostAdapter(Ppt.Application app, Func<int> maxChars)
         {
@@ -30,6 +31,75 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.PowerPoint; } }
         public string HostDisplayName { get { return "PowerPoint"; } }
+
+        public string CapabilitySummary
+        {
+            get
+            {
+                return "PowerPoint direct object-model access: presentation/slide map, shape text, tables, grouped objects, speaker notes, slide/current-view capture, confirmed slide insertion and speaker-note updates. OMNIX visibly navigates to the real slide/shape and activates the relevant native Ribbon tab when possible.";
+            }
+        }
+
+        public void BindRibbon(Office.IRibbonUI ribbonUi) { _ribbonUi = ribbonUi; }
+
+        public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
+        {
+            ActivateRelevantRibbonTab(toolName);
+            try
+            {
+                var pres = _app.ActivePresentation;
+                var win = _app.ActiveWindow;
+                if (pres == null || win == null) return;
+
+                int slideIndex = 0;
+                if (toolName == ToolNames.ReadDocumentSection || toolName == ToolNames.CaptureSlideAsImage ||
+                    toolName == ToolNames.AddSpeakerNotes)
+                    int.TryParse(args.Get("slide", "0"), out slideIndex);
+                else if (toolName == ToolNames.InsertSlide && stage == OfficeExecutionStage.Verify)
+                    int.TryParse(args.Get("index", "0"), out slideIndex);
+
+                if (slideIndex <= 0)
+                {
+                    var active = ResolveActiveSlide();
+                    if (active != null) slideIndex = active.SlideIndex;
+                }
+                if (slideIndex <= 0 || slideIndex > pres.Slides.Count) return;
+
+                try { win.View.GotoSlide(slideIndex); } catch { }
+                var slide = pres.Slides[slideIndex];
+
+                if (toolName == ToolNames.ReadDocumentSection)
+                {
+                    int shapeIndex = 0;
+                    int.TryParse(args.Get("shape", "0"), out shapeIndex);
+                    if (shapeIndex >= 1 && shapeIndex <= slide.Shapes.Count)
+                    {
+                        try { slide.Shapes[shapeIndex].Select(Office.MsoTriState.msoFalse); } catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("ui", "PowerPoint visible execution target reveal failed", ex);
+            }
+        }
+
+        private void ActivateRelevantRibbonTab(string toolName)
+        {
+            string tab = null;
+            switch (toolName)
+            {
+                case ToolNames.InsertSlide: tab = "TabHome"; break;
+                case ToolNames.AddSpeakerNotes: tab = "TabView"; break;
+                case ToolNames.ReadDocumentMap:
+                case ToolNames.ReadDocumentSection:
+                case ToolNames.CaptureSlideAsImage:
+                case ToolNames.CaptureCurrentViewAsImage: tab = "TabView"; break;
+            }
+            if (tab == null || _ribbonUi == null) return;
+            try { _ribbonUi.ActivateTabMso(tab); }
+            catch { }
+        }
 
         public OfficeContext ReadContext()
         {
@@ -348,6 +418,11 @@ namespace OMNIX.Core.Context
                         slide.Shapes.Placeholders[1].TextFrame.TextRange.Text = title;
                     if (!string.IsNullOrEmpty(body) && slide.Shapes.Placeholders.Count >= 2)
                         slide.Shapes.Placeholders[2].TextFrame.TextRange.Text = body;
+                    try
+                    {
+                        if (_app.ActiveWindow != null) _app.ActiveWindow.View.GotoSlide(slide.SlideIndex);
+                    }
+                    catch { }
                     break;
                 }
                 case ToolNames.AddSpeakerNotes:
