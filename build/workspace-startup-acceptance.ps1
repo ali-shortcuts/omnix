@@ -442,6 +442,8 @@ class WorkspaceStartupRegression {
             Check(nativeCall != null && nativeCall.Name == "write_to_cell" && nativeCall.ArgumentsJson.Contains("کد محصول"), "Provider-native tool call not parsed");
             var nativeTable = OMNIX.Core.Tools.ToolCallParser.Parse("<|tool_call_start|>[create_data_table(sheet='محصولات', uniqueName=True, headers=['کد','وزن'], rows=[['T001',3]])]<|tool_call_end|>");
             Check(nativeTable != null && nativeTable.Name == "create_data_table" && nativeTable.ArgumentsJson.Contains("\"uniqueName\":true"), "Nested native table arguments not parsed");
+            var namespacedFallback = OMNIX.Core.Tools.ToolCallParser.Parse("[omnix.write_to_cell(sheet='Sheet1', address='A1', value='x')]");
+            Check(namespacedFallback != null && namespacedFallback.Name == "write_to_cell", "Namespaced text-fallback tool name was not normalized before whitelist");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>broken").Name == "", "Incomplete call must fail closed");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("plain answer") == null, "Plain answer treated as a tool");
             Check(OMNIX.Core.Tools.ToolCallParser.Parse("<tool_call>{\"tool\":\"read_selection\"}</tool_call><tool_call>{}</tool_call>").Name == "", "Ambiguous calls accepted");
