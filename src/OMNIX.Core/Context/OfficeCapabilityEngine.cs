@@ -169,6 +169,7 @@ namespace OMNIX.Core.Context
             x.Add(C(HostType.PowerPoint,"hyperlink.add","Links","Add hyperlink to a shape.","slide,shape,url"));
             x.Add(C(HostType.PowerPoint,"animation.fade","Animations","Add a fade entrance animation to a shape.","slide,shape"));
             x.Add(C(HostType.PowerPoint,"transition.fade","Transitions","Apply a fade transition to a slide.","slide"));
+            x.AddRange(OfficeCapabilityExtensions.Descriptors());
             return x;
         }
     }
@@ -278,7 +279,7 @@ namespace OMNIX.Core.Context
                 case "page.fit": { var p=sheet().PageSetup; p.Zoom=false; p.FitToPagesWide=CapabilityArgs.I(a,"pagesWide",1,1,100); p.FitToPagesTall=CapabilityArgs.I(a,"pagesTall",1,1,100); break; }
                 case "print_area.set": sheet().PageSetup.PrintArea=range().Address; break;
                 case "print_area.clear": sheet().PageSetup.PrintArea=""; break;
-                default: throw new ArgumentException("Unsupported Excel capability: "+id);
+                default: if (OfficeCapabilityExtensions.TryApplyExcel(app,id,a)) break; throw new ArgumentException("Unsupported Excel capability: "+id);
             }
         }
     }
@@ -328,7 +329,7 @@ namespace OMNIX.Core.Context
                 case "field.insert": doc.Fields.Add(sel.Range,Word.WdFieldType.wdFieldEmpty,CapabilityArgs.S(a,"code",""),true); break;
                 case "footnote.add": doc.Footnotes.Add(sel.Range,Type.Missing,CapabilityArgs.S(a,"text","")); break;
                 case "endnote.add": doc.Endnotes.Add(sel.Range,Type.Missing,CapabilityArgs.S(a,"text","")); break;
-                default: throw new ArgumentException("Unsupported Word capability: "+id);
+                default: if (OfficeCapabilityExtensions.TryApplyWord(app,id,a)) break; throw new ArgumentException("Unsupported Word capability: "+id);
             }
         }
     }
@@ -369,7 +370,7 @@ namespace OMNIX.Core.Context
                 case "hyperlink.add": { var sh=shape(); sh.ActionSettings[Ppt.PpMouseActivation.ppMouseClick].Action=Ppt.PpActionType.ppActionHyperlink; sh.ActionSettings[Ppt.PpMouseActivation.ppMouseClick].Hyperlink.Address=CapabilityArgs.S(a,"url","");break; }
                 case "animation.fade": slide().TimeLine.MainSequence.AddEffect(shape(),Ppt.MsoAnimEffect.msoAnimEffectFade,Ppt.MsoAnimateByLevel.msoAnimateLevelNone,Ppt.MsoAnimTriggerType.msoAnimTriggerAfterPrevious); break;
                 case "transition.fade": slide().SlideShowTransition.EntryEffect=Ppt.PpEntryEffect.ppEffectFadeSmoothly; break;
-                default: throw new ArgumentException("Unsupported PowerPoint capability: "+id);
+                default: if (OfficeCapabilityExtensions.TryApplyPowerPoint(app,id,a)) break; throw new ArgumentException("Unsupported PowerPoint capability: "+id);
             }
         }
     }
