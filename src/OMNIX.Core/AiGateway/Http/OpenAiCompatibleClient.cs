@@ -177,6 +177,55 @@ namespace OMNIX.Core.AiGateway.Http
             public readonly StringBuilder Arguments = new StringBuilder();
         }
 
+        private static List<ProviderToolCall> ParseOpenAiNonStreamingToolCalls(JObject root)
+        {
+            var result = new List<ProviderToolCall>();
+            var calls = root.SelectToken("choices[0].message.tool_calls") as JArray;
+            if (calls != null)
+            {
+                foreach (JObject call in calls.OfType<JObject>())
+                {
+                    string id = (string)call["id"] ?? "";
+                    string name = (string)call.SelectToken("function.name") ?? "";
+                    string args = (string)call.SelectToken("function.arguments") ?? "{}";
+                    result.Add(DecodeProviderToolCall(id, name, args));
+                }
+            }
+            else
+            {
+                var legacy = root.SelectToken("choices[0].message.function_call") as JObject;
+                if (legacy != null)
+                    result.Add(DecodeProviderToolCall("", (string)legacy["name"] ?? "", (string)legacy["arguments"] ?? "{}"));
+            }
+            return result;
+        }
+
+        private static List<ProviderToolCall> ParseAnthropicNonStreamingToolCalls(JObject root)
+        {
+            var result = new List<ProviderToolCall>();
+            foreach (JObject part in (root["content"] as JArray ?? new JArray()).OfType<JObject>())
+            {
+                if (!string.Equals((string)part["type"], "tool_use", StringComparison.OrdinalIgnoreCase)) continue;
+                string id = (string)part["id"] ?? "";
+                string name = (string)part["name"] ?? "";
+                string args = part["input"] != null ? part["input"].ToString(Formatting.None) : "{}";
+                result.Add(DecodeProviderToolCall(id, name, args));
+            }
+            return result;
+        }
+
+        private static List<ProviderToolCall> MaterializeStreamingCalls(
+            Dictionary<int, StreamingToolAccumulator> accumulators)
+        {
+            var result = new List<ProviderToolCall>();
+            foreach (var kv in accumulators.OrderBy(x => x.Key))
+            {
+                var a = kv.Value;
+                result.Add(DecodeProviderToolCall(a.Id, a.Name, a.Arguments.ToString()));
+            }
+            return result;
+        }
+
         private string _configuredModel;
 
         public void SetModel(string model) { _configuredModel = model; }
