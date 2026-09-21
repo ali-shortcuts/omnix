@@ -73,7 +73,7 @@ namespace OMNIX.Core.Context
                 }
 
                 if (toolName == ToolNames.WriteToCell || toolName == ToolNames.InsertFormula ||
-                    toolName == ToolNames.HighlightRange)
+                    toolName == ToolNames.HighlightRange || toolName == ToolNames.FormatRange)
                 {
                     string sheetName = args.Get("sheet", "");
                     var ws = string.IsNullOrWhiteSpace(sheetName)
@@ -430,6 +430,7 @@ namespace OMNIX.Core.Context
                 case ToolNames.WriteToCell:
                 case ToolNames.InsertFormula:
                 case ToolNames.HighlightRange:
+                case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
