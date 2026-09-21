@@ -65,11 +65,12 @@ namespace OMNIX.Core.Tools
             try
             {
                 EnsureRequestScope(ct);
-                ReportProgress("Running: " + call.Name);
+                string label = FriendlyToolLabel(call.Name, adapter);
+                ReportProgress("Starting · " + label);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
                     : ExecuteRead(call, adapter, ct);
-                ReportProgress((result.Success ? "Completed: " : "Failed: ") + call.Name);
+                ReportProgress((result.Success ? "Completed · " : "Failed · ") + label);
                 return result;
             }
             catch (OperationCanceledException)
@@ -207,10 +208,13 @@ namespace OMNIX.Core.Tools
 
             // The active Office document may have changed while PrepareWrite inspected it.
             EnsureRequestScope(ct);
+            string label = FriendlyToolLabel(call.Name, adapter);
+            ReportProgress("Preview ready · " + label);
 
             if (WriteConfirmation == null)
                 return ToolResult.Fail("Write confirmation dialog is unavailable; change was NOT applied.");
 
+            ReportProgress("Waiting for approval · " + label);
             bool confirmed;
             try
             {
@@ -236,11 +240,42 @@ namespace OMNIX.Core.Tools
             }
 
             EnsureRequestScope(ct);
-            adapter.ApplyWrite(call.Name, call.ArgumentsJson);
+            ReportProgress("Applying · " + label);
+            string applyArguments = !string.IsNullOrWhiteSpace(preview.ArgumentsJson)
+                ? preview.ArgumentsJson
+                : call.ArgumentsJson;
+            adapter.ApplyWrite(call.Name, applyArguments);
             string hint = call.Name == ToolNames.CreateDataTable
                 ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
                 : Localization.Strings.T("S.Tools.Applied");
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
+
+        private static string FriendlyToolLabel(string toolName, IHostAdapter adapter)
+        {
+            string host = adapter != null ? adapter.HostDisplayName : "Office";
+            switch (toolName)
+            {
+                case ToolNames.SearchConversation: return "Searching conversation memory";
+                case ToolNames.SearchOfficeReference: return "Searching Office reference";
+                case ToolNames.ReadDocumentMap: return "Inspecting " + host + " structure";
+                case ToolNames.ReadDocumentSection: return "Reading a bounded " + host + " section";
+                case ToolNames.ReadSelection: return "Reading current " + host + " selection";
+                case ToolNames.ReadDocument:
+                case ToolNames.ReadPresentation: return "Reading " + host + " document content";
+                case ToolNames.CaptureChartAsImage: return "Inspecting Excel chart";
+                case ToolNames.CaptureSlideAsImage: return "Inspecting PowerPoint slide";
+                case ToolNames.CaptureCurrentViewAsImage: return "Inspecting current " + host + " view";
+                case ToolNames.CreateDataTable: return "Creating Excel worksheet and table";
+                case ToolNames.WriteToCell: return "Writing Excel cell";
+                case ToolNames.InsertFormula: return "Writing Excel formula";
+                case ToolNames.HighlightRange: return "Formatting Excel range";
+                case ToolNames.RewriteSelectedText: return "Rewriting selected Word text";
+                case ToolNames.InsertSlide: return "Creating PowerPoint slide";
+                case ToolNames.AddSpeakerNotes: return "Writing PowerPoint speaker notes";
+                default: return "Running approved " + host + " operation";
+            }
+        }
+
     }
 }
