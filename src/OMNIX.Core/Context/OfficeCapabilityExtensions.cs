@@ -198,7 +198,7 @@ namespace OMNIX.Core.Context
                     if(vt.Length>0){var ax=(Excel.Axis)ch.Axes(Excel.XlAxisType.xlValue,Excel.XlAxisGroup.xlPrimary);ax.HasTitle=true;ax.AxisTitle.Text=vt;} return true; }
                 case "chart.data_labels": {
                     var ch=((Excel.ChartObject)sheet().ChartObjects(CapabilityArgs.S(a,"name",""))).Chart; bool show=CapabilityArgs.B(a,"visible",true);
-                    foreach(Excel.Series s in (Excel.SeriesCollection)ch.SeriesCollection()) { if(show)s.ApplyDataLabels(); else if(s.HasDataLabels)s.DataLabels().Delete(); } return true; }
+                    foreach(Excel.Series s in (Excel.SeriesCollection)ch.SeriesCollection()) { if(show)s.ApplyDataLabels(); else if(s.HasDataLabels){var labels=(Excel.DataLabels)s.DataLabels();labels.Delete();} } return true; }
                 case "shape.add": {
                     var ws=sheet(); string type=CapabilityArgs.S(a,"type","rectangle").ToLowerInvariant();
                     var mt=type=="ellipse"?Office.MsoAutoShapeType.msoShapeOval:type=="roundedrectangle"?Office.MsoAutoShapeType.msoShapeRoundedRectangle:type=="arrow"?Office.MsoAutoShapeType.msoShapeRightArrow:Office.MsoAutoShapeType.msoShapeRectangle;
