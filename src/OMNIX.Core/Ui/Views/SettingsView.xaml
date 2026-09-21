@@ -206,15 +206,15 @@
                         ToolTip="Tests provider endpoint/authentication/model catalog only. It does not test the selected model."
                         Content="Test connection" Click="OnTestConnection" />
                 <Button x:Name="TestModelButton" Style="{StaticResource SetButton}" Margin="6,0,0,0"
-                        ToolTip="Sends a tiny synthetic text request to only the selected model. Provider usage limits and charges may apply."
+                        ToolTip="Runs a tiny document-free OMNIX tool-calling probe against only the selected model. Provider usage limits and charges may apply."
                         Content="Test model" Click="OnTestModel" />
                 <Button x:Name="VerifyModelsButton" Style="{StaticResource SetButton}" Margin="6,0,0,0"
-                        ToolTip="Tests detected models one at a time with a bounded synthetic text request. Stop at any time. Provider usage limits and charges may apply."
+                        ToolTip="Verifies detected models one at a time for actual OMNIX tool calling with a bounded document-free probe. Stop at any time. Provider usage limits and charges may apply."
                         Content="Verify models" Click="OnVerifyModels" />
                 <Button x:Name="CancelTestButton" Content="Stop" Click="OnCancelTest" Style="{StaticResource SetButton}" Visibility="Collapsed" Margin="6,4,0,0" />
             </WrapPanel>
             <CheckBox x:Name="WorkingModelsOnlyCheck" Visibility="Collapsed" Margin="0,6,0,0"
-                      Foreground="{DynamicResource B.Foreground}" Content="Show verified working models only"
+                      Foreground="{DynamicResource B.Foreground}" Content="Show OMNIX tool-compatible models only"
                       Checked="OnWorkingModelsFilterChanged" Unchecked="OnWorkingModelsFilterChanged" />
             <TextBlock x:Name="TestResultText" FontSize="11" Margin="0,6,0,0"
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
