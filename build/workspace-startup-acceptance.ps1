@@ -160,6 +160,25 @@ class WorkspaceStartupRegression {
         }
     }
 
+    sealed class NoReadbackProvider : IProviderAdapter {
+        public int Calls;
+        public ProviderInfo Info { get; private set; }
+        public NoReadbackProvider() { Info=new ProviderInfo{Id="custom",DisplayName="No Readback Fixture",Kind=ProviderKind.Cloud,Vision=VisionSupport.No}; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            if(Calls==1) return Task.FromResult(new ChatResponse {
+                ToolCalls=new List<ProviderToolCall> {
+                    new ProviderToolCall { Id="call-1", Name="write_to_cell", ArgumentsJson="{\"address\":\"A1\",\"value\":\"done\"}" }
+                }
+            });
+            return Task.FromResult(new ChatResponse { Text="Everything is complete." });
+        }
+    }
+
     static void NativeGatewayRegression() {
         var settings=SettingsManager.Instance.Settings;
         var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
@@ -178,6 +197,24 @@ class WorkspaceStartupRegression {
             Check(confirmations==1 && host.Writes==1,"Native tool call with empty text was not executed through confirmation");
             Check(host.Reads>=2,"Latest write was not read back after execution");
             Check(result.Text=="Verified completed","Native tool loop did not return final answer after read-back");
+        } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
+    }
+
+    static void VerificationEnforcementRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            var registry=new ProviderRegistry(); var provider=new NoReadbackProvider();
+            var providers=(System.Collections.Generic.List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+            providers.Clear(); providers.Add(provider);
+            var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+            var host=new FakeHost { AllowWrites=true }; int confirmations=0;
+            var executor=new ToolExecutor { WriteConfirmation=preview=> { confirmations++; return Task.FromResult(true); } };
+            var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn { Role=ChatRole.User,Text="Write done into A1 in this Excel file" } },host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+            Check(confirmations==1 && host.Writes==1,"Verification enforcement repeated or skipped the approved write");
+            Check(provider.Calls==4,"Verification enforcement did not perform bounded repair attempts");
+            Check(result.Text.Contains("could not be verified") || result.Text.Contains("runtime stopped safely"),"Unverified write was incorrectly reported as completed");
         } finally { settings.SelectedProviderId=oldProvider; settings.Privacy=oldPrivacy; settings.PreferLocalWhenAvailable=oldLocal; }
     }
 
@@ -427,6 +464,7 @@ class WorkspaceStartupRegression {
             CapabilityRegression();
             AccessRecoveryRegression();
             NativeGatewayRegression();
+            VerificationEnforcementRegression();
             var watch = Stopwatch.StartNew();
             var router = new ProviderRouter(new ProviderRegistry());
             router.BuildCredentials("ollama"); router.BuildCredentials("lmstudio");
