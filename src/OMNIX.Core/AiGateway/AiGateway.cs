@@ -728,7 +728,8 @@ namespace OMNIX.Core.AiGateway
             sb.AppendLine("Formatting: answer in clean Markdown. Put Excel formulas in backticks (e.g. `=SUM(A1:A10)`). Keep answers compact — the panel is 360px wide.");
             sb.AppendLine();
             sb.AppendLine("AVAILABLE TOOLS (whitelist — nothing else exists):");
-            sb.AppendLine("When a tool is needed, return ONLY one fenced tool block and no user-facing prose in that provider turn. OMNIX hides this internal protocol and shows the user your answer after the tool result:");
+            sb.AppendLine("OMNIX supplies provider-native tool/function definitions when the selected provider supports them. Prefer native tool calling and request exactly ONE tool per provider turn so OMNIX can validate, confirm, execute and verify it sequentially.");
+            sb.AppendLine("Legacy fallback only: if the provider cannot use native tools, return ONLY one fenced tool block and no user-facing prose in that provider turn:");
             sb.AppendLine("```omnix_tool");
             sb.AppendLine("{\"tool\":\"<name>\",\"args\":{...}}");
             sb.AppendLine("```");
