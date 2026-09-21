@@ -24,7 +24,7 @@ namespace OMNIX.Core.Settings
         public string Name { get; set; }
         public string BaseUrl { get; set; }
         public string Model { get; set; }
-        /// <summary>Result of the automatic Vision probe performed by Test Connection (null = unknown).</summary>
+        /// <summary>Last explicit model-capability probe result when available (null = unknown). Connection tests never infer Vision support.</summary>
         public bool? SupportsVision { get; set; }
     }
 
