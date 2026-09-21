@@ -82,3 +82,22 @@ Sources:
 - https://learn.microsoft.com/en-us/visualstudio/vsto/office-solutions-development-overview-vsto
 - https://learn.microsoft.com/en-us/microsoft-365-apps/end-of-support/windows-10-support
 - https://learn.microsoft.com/en-us/office/ltsc/2024/overview
+
+## Broad Office capability engine
+
+OMNIX now exposes a queryable, host-specific Object Model capability catalog through
+`list_office_capabilities` and a single validated mutation boundary
+`execute_office_capability`. The catalog currently contains **89 implemented operations**:
+**41 Excel**, **29 Word**, and **19 PowerPoint**, in addition to the existing bounded read,
+Vision, table-building, formula, formatting, notes, and slide tools.
+
+The capability engine covers major professional surfaces including worksheet/range/data validation,
+filters, sorting, names, tables, charts and page layout in Excel; editing, font/paragraph styles,
+lists, tables, headers/footers, bookmarks, comments, review/revisions, references and page layout
+in Word; and slides, shapes, text, tables, arrange/z-order, links, notes, animation and transitions
+in PowerPoint.
+
+This is deliberately **not** an unrestricted Office escape hatch. Arbitrary `ExecuteMso`, VBA/macro
+execution, Trust Center/security changes, shell/registry access, and arbitrary file-system access
+remain unavailable. Every catalogued mutation still goes through document-scope validation,
+preview, explicit user confirmation, real Office Object Model execution, and visible target reveal.
