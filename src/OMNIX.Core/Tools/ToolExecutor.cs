@@ -115,6 +115,15 @@ namespace OMNIX.Core.Tools
                     var args = ToolArguments.Parse(call.ArgumentsJson);
                     return ToolResult.Ok(Reference.OfficeReference.Search(args.Get("host", adapter.HostDisplayName), args.Get("query", ""), args.Integer("offset", 0, 0, 10000)));
                 }
+                case ToolNames.ListOfficeCapabilities:
+                {
+                    var capabilityHost = adapter as IOfficeCapabilityHost;
+                    if (capabilityHost == null) return ToolResult.Fail("Capability catalog is unavailable for this host.");
+                    var args = ToolArguments.Parse(call.ArgumentsJson);
+                    string query = args.Get("query", "");
+                    int offset = args.Integer("offset", 0, 0, 100000);
+                    return ToolResult.Ok(capabilityHost.ListCapabilities(query, offset));
+                }
                 case ToolNames.ReadDocumentMap:
                 case ToolNames.ReadDocumentSection:
                 {
@@ -236,7 +245,9 @@ namespace OMNIX.Core.Tools
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Verify);
             string hint = call.Name == ToolNames.CreateDataTable
                 ? "New worksheet and data table created; headers, cell values and row count verified. To reverse this operation, delete the new worksheet; native Ctrl+Z is not guaranteed."
-                : Localization.Strings.T("S.Tools.Applied");
+                : call.Name == ToolNames.ExecuteOfficeCapability
+                    ? "Office capability applied through the active host's validated Object Model implementation."
+                    : Localization.Strings.T("S.Tools.Applied");
             return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
         }
 

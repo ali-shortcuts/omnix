@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -44,6 +44,21 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                try
+                {
+                    string capability = args.Get("capability", "");
+                    var nested = args.Token("args") as Newtonsoft.Json.Linq.JObject;
+                    int slideIndex = 0;
+                    if (nested != null && nested["slide"] != null) int.TryParse(nested["slide"].ToString(), out slideIndex);
+                    ActivateCapabilityRibbonTab(capability);
+                    if (slideIndex > 0 && _app.ActiveWindow != null && _app.ActivePresentation != null &&
+                        slideIndex <= _app.ActivePresentation.Slides.Count)
+                        _app.ActiveWindow.View.GotoSlide(slideIndex);
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             try
             {
@@ -82,6 +97,23 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "PowerPoint visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("animation.", StringComparison.OrdinalIgnoreCase)
+                ? "TabAnimations"
+                : capability.StartsWith("transition.", StringComparison.OrdinalIgnoreCase)
+                    ? "TabTransitions"
+                    : capability.StartsWith("slide.background", StringComparison.OrdinalIgnoreCase)
+                        ? "TabDesign"
+                        : capability.StartsWith("shape.", StringComparison.OrdinalIgnoreCase) ||
+                          capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                          capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase)
+                            ? "TabInsert"
+                            : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
@@ -348,8 +380,13 @@ namespace OMNIX.Core.Context
             return CaptureSlideAsImage(0);
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.PowerPoint, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return PowerPointCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { PowerPointCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) return PrepareCapability(argumentsJson);
             var args = ToolArguments.Parse(argumentsJson);
             switch (toolName)
             {
@@ -398,6 +435,7 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) { ApplyCapability(argumentsJson); return; }
             var args = ToolArguments.Parse(argumentsJson);
             var pres = _app.ActivePresentation;
             if (pres == null)

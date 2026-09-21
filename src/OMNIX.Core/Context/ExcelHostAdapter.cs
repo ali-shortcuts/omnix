@@ -19,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -52,6 +52,28 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                try
+                {
+                    var nested = args.Token("args") as Newtonsoft.Json.Linq.JObject;
+                    string capability = args.Get("capability", "");
+                    string sheetName = nested != null && nested["sheet"] != null ? nested["sheet"].ToString() : "";
+                    string address = nested != null && nested["address"] != null ? nested["address"].ToString() : "";
+                    ActivateCapabilityRibbonTab(capability);
+                    var capabilityWorkbook = _app.ActiveWorkbook;
+                    if (capabilityWorkbook != null && !string.IsNullOrWhiteSpace(sheetName))
+                    {
+                        var ws = capabilityWorkbook.Worksheets[sheetName] as Excel.Worksheet;
+                        if (ws != null)
+                        {
+                            ws.Activate();
+                            if (!string.IsNullOrWhiteSpace(address)) ShowRange(ws.Range[address]);
+                        }
+                    }
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             var wb = _app.ActiveWorkbook;
             if (wb == null) return;
@@ -123,6 +145,25 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "Excel visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("chart.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase)
+                ? "TabInsert"
+                : capability.StartsWith("sort.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("validation.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("range.remove_duplicates", StringComparison.OrdinalIgnoreCase)
+                    ? "TabData"
+                    : capability.StartsWith("page.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("print_area.", StringComparison.OrdinalIgnoreCase)
+                        ? "TabPageLayout"
+                        : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
@@ -421,6 +462,10 @@ namespace OMNIX.Core.Context
             }
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.Excel, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return ExcelCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { ExcelCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
             switch (toolName)
@@ -432,6 +477,8 @@ namespace OMNIX.Core.Context
                 case ToolNames.HighlightRange:
                 case ToolNames.FormatRange:
                     return ExcelWrite.Prepare(this, toolName, argumentsJson);
+                case ToolNames.ExecuteOfficeCapability:
+                    return PrepareCapability(argumentsJson);
                 default:
                     throw new OmnixException(ErrorCode.CORE_ERROR,
                         "Tool '" + toolName + "' is not supported by Excel.",
@@ -442,6 +489,7 @@ namespace OMNIX.Core.Context
         public void ApplyWrite(string toolName, string argumentsJson)
         {
             if (toolName == ToolNames.CreateDataTable) ExcelTableBuilder.Apply(_app, argumentsJson);
+            else if (toolName == ToolNames.ExecuteOfficeCapability) ApplyCapability(argumentsJson);
             else ExcelWrite.ApplyWrite(this, toolName, argumentsJson);
         }
 

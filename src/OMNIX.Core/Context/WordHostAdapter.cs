@@ -16,7 +16,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -47,6 +47,17 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                string capability = args.Get("capability", "");
+                ActivateCapabilityRibbonTab(capability);
+                try
+                {
+                    if (_app.ActiveWindow != null && _app.Selection != null)
+                        _app.ActiveWindow.ScrollIntoView(_app.Selection.Range, true);
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             try
             {
@@ -88,6 +99,26 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "Word visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("review.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("comment.", StringComparison.OrdinalIgnoreCase)
+                ? "TabReview"
+                : capability.StartsWith("page.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("break.", StringComparison.OrdinalIgnoreCase)
+                    ? "TabPageLayoutWord"
+                    : capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("bookmark.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("field.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("footnote.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("endnote.", StringComparison.OrdinalIgnoreCase)
+                        ? "TabInsert"
+                        : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
@@ -339,8 +370,13 @@ namespace OMNIX.Core.Context
             }
         }
 
+        public string ListCapabilities(string query, int offset) { return OfficeCapabilityRegistry.Search(HostType.Word, query, offset); }
+        public WritePreview PrepareCapability(string argumentsJson) { return WordCapabilityEngine.Prepare(_app, argumentsJson); }
+        public void ApplyCapability(string argumentsJson) { WordCapabilityEngine.Apply(_app, argumentsJson); }
+
         public WritePreview PrepareWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) return PrepareCapability(argumentsJson);
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR,
                     "Tool '" + toolName + "' is not supported by Word.",
@@ -367,6 +403,7 @@ namespace OMNIX.Core.Context
 
         public void ApplyWrite(string toolName, string argumentsJson)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability) { ApplyCapability(argumentsJson); return; }
             if (toolName != ToolNames.RewriteSelectedText)
                 throw new OmnixException(ErrorCode.CORE_ERROR, "Unknown Word write tool: " + toolName, "", "");
 

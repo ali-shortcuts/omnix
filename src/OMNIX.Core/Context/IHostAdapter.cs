@@ -45,6 +45,13 @@ namespace OMNIX.Core.Context
         string CapabilitySummary { get; }
     }
 
+    public interface IOfficeCapabilityHost
+    {
+        string ListCapabilities(string query, int offset);
+        WritePreview PrepareCapability(string argumentsJson);
+        void ApplyCapability(string argumentsJson);
+    }
+
     public interface IHostAdapter
     {
         HostType Host { get; }
