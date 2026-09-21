@@ -23,6 +23,7 @@ namespace OMNIX.Core.Tools
         public const string CaptureChartAsImage = "capture_chart_as_image";
         public const string CaptureSlideAsImage = "capture_slide_as_image";
         public const string CaptureCurrentViewAsImage = "capture_current_view_as_image";
+        public const string ListOfficeCapabilities = "list_office_capabilities";
 
         // write (user confirmation + native Office undo)
         public const string CreateDataTable = "create_data_table";
@@ -33,17 +34,18 @@ namespace OMNIX.Core.Tools
         public const string AddSpeakerNotes = "add_speaker_notes";
         public const string HighlightRange = "highlight_range";
         public const string FormatRange = "format_range";
+        public const string ExecuteOfficeCapability = "execute_office_capability";
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
             SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
-            CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage,
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange
+            CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage, ListOfficeCapabilities,
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ExecuteOfficeCapability
         };
 
         private static readonly HashSet<string> WriteTools = new HashSet<string>(StringComparer.Ordinal)
         {
-            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange
+            CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ExecuteOfficeCapability
         };
 
         public static bool IsWhitelisted(string name) { return !string.IsNullOrEmpty(name) && Whitelist.Contains(name); }
