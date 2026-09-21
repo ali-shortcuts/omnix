@@ -13,6 +13,7 @@ namespace OMNIX.Core.Tools
     public static class ToolNames
     {
         // read-only
+        public const string ReadOfficeAccess = "read_office_access";
         public const string SearchConversation = "search_conversation";
         public const string SearchOfficeReference = "search_office_reference";
         public const string ReadDocumentMap = "read_document_map";
@@ -38,7 +39,7 @@ namespace OMNIX.Core.Tools
 
         private static readonly HashSet<string> Whitelist = new HashSet<string>(StringComparer.Ordinal)
         {
-            SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
+            ReadOfficeAccess, SearchConversation, SearchOfficeReference, ReadDocumentMap, ReadDocumentSection, ReadSelection, ReadDocument, ReadPresentation,
             CaptureChartAsImage, CaptureSlideAsImage, CaptureCurrentViewAsImage, ListOfficeCapabilities,
             CreateDataTable, WriteToCell, InsertFormula, RewriteSelectedText, InsertSlide, AddSpeakerNotes, HighlightRange, FormatRange, ExecuteOfficeCapability
         };

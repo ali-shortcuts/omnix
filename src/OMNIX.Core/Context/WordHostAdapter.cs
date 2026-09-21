@@ -16,7 +16,7 @@ namespace OMNIX.Core.Context
     /// the Text property is requested. Truncating a giant string after doc.Content.Text has already
     /// been materialized defeats the context limit and can pause Word on very large documents.
     /// </summary>
-    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
+    public sealed class WordHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost, IOfficeAccessHost
     {
         private const int MaxRewriteSelectionChars = 50000;
         private const int MaxRewriteReplacementChars = 50000;
@@ -34,6 +34,22 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.Word; } }
         public string HostDisplayName { get { return "Word"; } }
+
+        public string ReadOfficeAccess()
+        {
+            try
+            {
+                if (_app.Documents.Count == 0) return "host=Word; documentPresent=false; reason=No active document.";
+                var doc = _app.ActiveDocument;
+                return "host=Word; documentPresent=true; writeToolsExposed=true; readOnly=" + doc.ReadOnly +
+                    "; protectionType=" + doc.ProtectionType + "; nativeOfficeValidationStillRequired=true; approvalRequired=true";
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("gateway", "Office access inspection failed", ex);
+                return "accessInspection=unknown; reason=Office did not return its state; do not infer that all write tools are unavailable";
+            }
+        }
 
         public string CapabilitySummary
         {

@@ -52,6 +52,15 @@ namespace OMNIX.Core.AiGateway
         /// </summary>
         public event Action<IProviderAdapter> SuggestFailover;
 
+        internal static bool IsUnsupportedAccessClaim(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            string normalized = text.Replace('ي', 'ی').Replace('ك', 'ک').ToLowerInvariant();
+            bool access = normalized.Contains("write access") || normalized.Contains("editing access") || normalized.Contains("دسترسی نوشتن") || normalized.Contains("دسترسی ویرایش");
+            bool denied = normalized.Contains("unavailable") || normalized.Contains("not available") || normalized.Contains("don't have") || normalized.Contains("do not have") || normalized.Contains("نیست") || normalized.Contains("ندارم");
+            return access && denied;
+        }
+
         public Task ProbeLocalAsync()
         {
             return _router.ProbeLocalProvidersAsync();
@@ -76,6 +85,8 @@ namespace OMNIX.Core.AiGateway
 
             var approvedProviders = new HashSet<string>(StringComparer.Ordinal);
             ChatResponse final = null;
+            bool accessClarified = false;
+            bool writeAttempted = false;
             for (int round = 0; round < MaxProviderToolRounds; round++)
             {
                 // Refresh the Office runtime envelope before EVERY provider turn. A previous tool
@@ -159,8 +170,21 @@ namespace OMNIX.Core.AiGateway
                 // suppressed and only the later user-facing answer reaches the chat bubble.
                 visibleDelta.Complete(call == null, response.Text);
 
+                if (call == null && !accessClarified && !writeAttempted && IsUnsupportedAccessClaim(response.Text))
+                {
+                    accessClarified = true;
+                    var access = await toolExecutor.ExecuteAsync(new ToolCall { Name = ToolNames.ReadOfficeAccess, ArgumentsJson = "{}" }, hostAdapter).ConfigureAwait(true);
+                    history.Add(current);
+                    history.Add(new ChatTurn { Role = ChatRole.Assistant, Text = response.Text, TimestampUtc = DateTime.UtcNow });
+                    current = new ChatTurn { Role = ChatRole.User, TimestampUtc = DateTime.UtcNow,
+                        Text = "OMNIX RUNTIME ACCESS CHECK: " + access.ContentForModel +
+                        "\nYour previous access claim was not backed by a write tool result. Use this measured state. If the original user requested a change and the relevant target is available, invoke its documented tool through normal confirmation. Otherwise report the specific measured blocker or uncertainty. Do not invent a permission problem, do not bypass protection, and do not claim completion without a tool result." };
+                    continue;
+                }
+
                 if (call == null)
                 {
+                    Logger.Gateway("Provider returned final text; writeAttempted=" + writeAttempted + "; accessClarified=" + accessClarified);
                     final = response;
                     return final;
                 }
@@ -179,6 +203,7 @@ namespace OMNIX.Core.AiGateway
                     continue;
                 }
 
+                if (ToolNames.IsWriteTool(call.Name)) writeAttempted = true;
                 ToolResult result = await toolExecutor.ExecuteAsync(call, hostAdapter).ConfigureAwait(true);
                 history.Add(current);
                 // The provider needs its tool-request text in internal conversation history, even
@@ -456,6 +481,9 @@ namespace OMNIX.Core.AiGateway
                 if (visible != null)
                     sb.AppendLine("EXECUTABLE HOST CAPABILITIES: " + visible.CapabilitySummary);
             }
+            var accessHost = hostAdapter as IOfficeAccessHost;
+            if (accessHost != null) sb.AppendLine("MEASURED OFFICE ACCESS: " + accessHost.ReadOfficeAccess());
+            sb.AppendLine("read_office_access {} inspects actual Office read-only/protection state and confirms whether the write confirmation handler exists. It does not change protection. Tool availability and document editability are different: never say write access is missing without a measured blocker or a failed tool result. If the user asks for a supported change, invoke the tool rather than promise to act later.");
             sb.AppendLine("Work method: inspect the exact target, use the native Office structure appropriate to the request, request approval for each concrete write, then read back the affected area to check the result. Never claim that a tool or test succeeded without its result. Do not substitute an unrelated generic template or mix tools that do not belong to the requested deliverable.");
             sb.AppendLine("For a business system: work to a professional Office standard: consistent labels, data types, formulas, validation logic, readable layout and verification. Clarify only business rules that materially affect correctness. Never invent live business data. A formatted spreadsheet is not automatically a relational database or a tested accounting system.");
             sb.AppendLine("There are at most 24 provider/tool turns per request. Complete ordinary multi-sheet jobs within that bounded loop when possible; scope genuinely large jobs into explicit stages and report unfinished work. Model support for image input is required for pixel-level Vision; structured Office inspection does not require image input.");

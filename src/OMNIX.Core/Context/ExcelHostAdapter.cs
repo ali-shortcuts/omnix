@@ -19,7 +19,7 @@ namespace OMNIX.Core.Context
     /// it afterward can allocate millions of cells and freeze Office, so all bulk reads first resize
     /// to the configured context budget.
     /// </summary>
-    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
+    public sealed class ExcelHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost, IOfficeAccessHost
     {
         private const int DisplayMaxColumns = 8;
         private const int FormulaCellCap = 60;
@@ -39,6 +39,26 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
+
+        public string ReadOfficeAccess()
+        {
+            try
+            {
+                var book = _app.ActiveWorkbook;
+                if (book == null) return "host=Excel; documentPresent=false; reason=No active workbook. Open a workbook.";
+                var sheet = _app.ActiveSheet as Excel.Worksheet;
+                return "host=Excel; documentPresent=true; writeToolsExposed=true; readOnly=" + book.ReadOnly +
+                    "; workbookStructureProtected=" + book.ProtectStructure +
+                    "; activeSheetProtected=" + (sheet != null && sheet.ProtectContents) +
+                    "; createDataTablePreflight=" + (!book.ReadOnly && !book.ProtectStructure ? "available_subject_to_approval" : "blocked_by_workbook_state") +
+                    "; sheetProtectionDoesNotImplyAllWorkbookWritesBlocked=true; nativeOfficeValidationStillRequired=true";
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("gateway", "Office access inspection failed", ex);
+                return "accessInspection=unknown; reason=Office did not return its state; do not infer that all write tools are unavailable";
+            }
+        }
 
         public string CapabilitySummary
         {

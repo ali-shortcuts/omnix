@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost, IOfficeAccessHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -31,6 +31,22 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.PowerPoint; } }
         public string HostDisplayName { get { return "PowerPoint"; } }
+
+        public string ReadOfficeAccess()
+        {
+            try
+            {
+                if (_app.Presentations.Count == 0) return "host=PowerPoint; documentPresent=false; reason=No active presentation.";
+                var presentation = _app.ActivePresentation;
+                return "host=PowerPoint; documentPresent=true; writeToolsExposed=true; readOnly=" + presentation.ReadOnly +
+                    "; nativeOfficeValidationStillRequired=true; approvalRequired=true";
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error("gateway", "Office access inspection failed", ex);
+                return "accessInspection=unknown; reason=Office did not return its state; do not infer that all write tools are unavailable";
+            }
+        }
 
         public string CapabilitySummary
         {

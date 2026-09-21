@@ -253,6 +253,7 @@ namespace OMNIX.Core.Ui
             _cts = requestCts;
             var ct = requestCts.Token;
             var sb = new System.Text.StringBuilder();
+            bool acceptDeltas = true;
 
             // AiGateway owns the provider/tool loop, while this per-window executor owns the
             // Office boundary. The validator performs a deep Office identity check only when a
@@ -278,12 +279,12 @@ namespace OMNIX.Core.Ui
                         // Network adapters may emit deltas from a non-UI continuation. Never call
                         // Office COM here. The version check is in-memory and the UI update is
                         // dispatched only while the originating document scope remains valid.
-                        if (!IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
+                        if (!acceptDeltas || !IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
                         var dispatcher = View.Dispatcher;
                         if (dispatcher.HasShutdownStarted) return;
                         dispatcher.BeginInvoke(new Action(delegate
                         {
-                            if (!IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
+                            if (!acceptDeltas || !IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
                             sb.Append(delta);
                             bubble.ReplaceText(sb.ToString());
                         }));
@@ -291,6 +292,7 @@ namespace OMNIX.Core.Ui
                     _toolExecutor,
                     ct).ConfigureAwait(true);
 
+                acceptDeltas = false;
                 // A provider can race cancellation and return a completed response. Re-check both
                 // token and actual Office document identity before touching UI/history after await.
                 ct.ThrowIfCancellationRequested();
@@ -298,8 +300,13 @@ namespace OMNIX.Core.Ui
                     throw new OperationCanceledException("Office document changed during the AI request.", ct);
                 if (_disposed) return;
 
-                if (response != null && !string.IsNullOrEmpty(response.Text) && sb.Length == 0)
+                // The completed gateway answer is authoritative. Earlier streamed planning or
+                // a corrected access claim must not be saved instead of the execution result.
+                if (response != null && !string.IsNullOrEmpty(response.Text))
+                {
+                    sb.Clear();
                     sb.Append(response.Text);
+                }
 
                 assistantTurn.Text = sb.Length > 0 ? sb.ToString() : Localization.Strings.T("S.Chat.Cancelled");
                 bubble.ReplaceText(assistantTurn.Text);
@@ -333,6 +340,7 @@ namespace OMNIX.Core.Ui
             }
             finally
             {
+                acceptDeltas = false;
                 _busy = false;
 
                 // Clear request bindings only if they still belong to this request. A controller

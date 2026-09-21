@@ -62,10 +62,12 @@ namespace OMNIX.Core.Tools
 
             try
             {
+                Logger.Gateway("Tool dispatch: " + call.Name);
                 EnsureRequestScope(ct);
                 ToolResult result = ToolNames.IsWriteTool(call.Name)
                     ? await ExecuteWriteAsync(call, adapter, ct).ConfigureAwait(true)
                     : ExecuteRead(call, adapter, ct);
+                Logger.Gateway("Tool result: " + call.Name + "; success=" + result.Success);
                 return result;
             }
             catch (OperationCanceledException)
@@ -106,6 +108,12 @@ namespace OMNIX.Core.Tools
 
             switch (call.Name)
             {
+                case ToolNames.ReadOfficeAccess:
+                {
+                    var access = adapter as IOfficeAccessHost;
+                    return ToolResult.Ok("confirmationHandlerAvailable=" + (WriteConfirmation != null) + "; " +
+                        (access != null ? access.ReadOfficeAccess() : "accessInspection=not_supported; do not assume denied"));
+                }
                 case ToolNames.SearchConversation:
                     return ConversationSearch != null
                         ? ToolResult.Ok(ConversationSearch(ToolArguments.Parse(call.ArgumentsJson).Get("query", "")))

@@ -45,6 +45,11 @@ namespace OMNIX.Core.Context
         string CapabilitySummary { get; }
     }
 
+    public interface IOfficeAccessHost
+    {
+        string ReadOfficeAccess();
+    }
+
     public interface IOfficeCapabilityHost
     {
         string ListCapabilities(string query, int offset);

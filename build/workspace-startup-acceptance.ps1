@@ -95,7 +95,9 @@ class WorkspaceStartupRegression {
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
-    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter {
+    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter, IOfficeAccessHost {
+        public int AccessReads;
+        public string ReadOfficeAccess() { AccessReads++; return "documentPresent=true; writeToolsExposed=true; readOnly=false; workbookStructureProtected=false"; }
         public int Reads;
         public HostType Host { get { return HostType.Excel; } }
         public string HostDisplayName { get { return "Excel"; } }
@@ -112,6 +114,19 @@ class WorkspaceStartupRegression {
     }
     static void CapabilityRegression() {
         var host=new FakeHost(); var executor=new ToolExecutor();
+        var accessCall = new ToolCall { Name=ToolNames.ReadOfficeAccess, ArgumentsJson="{}" };
+        var accessResult = executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult();
+        Check(accessResult.Success && accessResult.ContentForModel.Contains("confirmationHandlerAvailable=False") && host.AccessReads==1,"Access probe must disclose missing confirmation handler");
+        executor.WriteConfirmation = preview => Task.FromResult(true);
+        Check(executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult().ContentForModel.Contains("confirmationHandlerAvailable=True"),"Access probe did not reflect available confirmation");
+        executor.RequestScopeValidator = () => false;
+        try { executor.ExecuteAsync(accessCall,host).GetAwaiter().GetResult(); throw new Exception("Stale access probe allowed"); } catch(OperationCanceledException) {}
+        Check(host.AccessReads==2,"Access probe crossed stale document boundary");
+        executor.RequestScopeValidator = () => true;
+        var claim = typeof(OMNIX.Core.AiGateway.AiGateway).GetMethod("IsUnsupportedAccessClaim",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static);
+        Check((bool)claim.Invoke(null,new object[]{"دسترسی نوشتن به فایل فعال در این نشست در دسترس نیست"}),"Reported Persian access denial not recognized");
+        Check((bool)claim.Invoke(null,new object[]{"Write access is unavailable"}),"English access denial not recognized");
+        Check(!(bool)claim.Invoke(null,new object[]{"The table was created"}),"Normal answer misclassified as denial");
         var map=new ToolCall { Name=ToolNames.ReadDocumentMap,ArgumentsJson="{\"offset\":20}" };
         Check(executor.ExecuteAsync(map,host).GetAwaiter().GetResult().Success && host.Reads==1,"Map navigation failed");
         var section=new ToolCall { Name=ToolNames.ReadDocumentSection,ArgumentsJson="{}" };
