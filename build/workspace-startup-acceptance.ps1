@@ -6,6 +6,7 @@ $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $wpf = Join-Path $framework 'WPF'
 $source = @'
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -115,7 +116,8 @@ class WorkspaceStartupRegression {
     }
     sealed class AccessProvider : IProviderAdapter {
         public int Calls; public bool CancelScenario;
-        public ProviderInfo Info { get; private set; } = new ProviderInfo { Id="custom", DisplayName="Test", Kind=ProviderKind.Cloud, Vision=VisionSupport.No };
+        public ProviderInfo Info { get; private set; }
+        public AccessProvider() { Info = new ProviderInfo { Id="custom", DisplayName="Test", Kind=ProviderKind.Cloud, Vision=VisionSupport.No }; }
         public void Configure(ProviderCredentials credentials) {}
         public bool SupportsVisionNow() { return false; }
         public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
