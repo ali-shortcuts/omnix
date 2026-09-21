@@ -52,6 +52,28 @@ namespace OMNIX.Core.Context
 
         public void RevealOperation(string toolName, ToolArguments args, OfficeExecutionStage stage)
         {
+            if (toolName == ToolNames.ExecuteOfficeCapability)
+            {
+                try
+                {
+                    var nested = args.Token("args") as Newtonsoft.Json.Linq.JObject;
+                    string capability = args.Get("capability", "");
+                    string sheetName = nested != null && nested["sheet"] != null ? nested["sheet"].ToString() : "";
+                    string address = nested != null && nested["address"] != null ? nested["address"].ToString() : "";
+                    ActivateCapabilityRibbonTab(capability);
+                    var wb = _app.ActiveWorkbook;
+                    if (wb != null && !string.IsNullOrWhiteSpace(sheetName))
+                    {
+                        var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                        if (ws != null)
+                        {
+                            ws.Activate();
+                            if (!string.IsNullOrWhiteSpace(address)) ShowRange(ws.Range[address]);
+                        }
+                    }
+                }
+                catch { }
+            }
             ActivateRelevantRibbonTab(toolName);
             var wb = _app.ActiveWorkbook;
             if (wb == null) return;
@@ -123,6 +145,25 @@ namespace OMNIX.Core.Context
             {
                 Logging.Logger.Error("ui", "Excel visible execution target reveal failed", ex);
             }
+        }
+
+        private void ActivateCapabilityRibbonTab(string capability)
+        {
+            if (_ribbonUi == null || string.IsNullOrWhiteSpace(capability)) return;
+            string tab = capability.StartsWith("chart.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("table.", StringComparison.OrdinalIgnoreCase) ||
+                         capability.StartsWith("hyperlink.", StringComparison.OrdinalIgnoreCase)
+                ? "TabInsert"
+                : capability.StartsWith("sort.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("filter.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("validation.", StringComparison.OrdinalIgnoreCase) ||
+                  capability.StartsWith("range.remove_duplicates", StringComparison.OrdinalIgnoreCase)
+                    ? "TabData"
+                    : capability.StartsWith("page.", StringComparison.OrdinalIgnoreCase) ||
+                      capability.StartsWith("print_area.", StringComparison.OrdinalIgnoreCase)
+                        ? "TabPageLayout"
+                        : "TabHome";
+            try { _ribbonUi.ActivateTabMso(tab); } catch { }
         }
 
         private void ActivateRelevantRibbonTab(string toolName)
