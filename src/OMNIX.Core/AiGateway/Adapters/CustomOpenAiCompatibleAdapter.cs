@@ -49,7 +49,8 @@ namespace OMNIX.Core.AiGateway.Adapters
             var cp = SettingsManager.Instance.Settings.EndpointConfig(Info.Id);
             if (string.IsNullOrWhiteSpace(url) && cp != null) url = cp.BaseUrl;
 
-            _anthropic = cp != null && cp.ApiType == "Anthropic";
+            _anthropic = string.Equals(_creds.ApiType ?? (cp != null ? cp.ApiType : null),
+                "Anthropic", StringComparison.OrdinalIgnoreCase);
             Uri parsed = new Uri(NormalizeBaseUrl(url));
             _baseUrl = parsed.AbsoluteUri.TrimEnd('/');
             Info.Kind = IsLoopbackEndpoint(parsed) ? ProviderKind.Local : ProviderKind.Cloud;

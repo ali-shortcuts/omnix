@@ -272,6 +272,7 @@ namespace OMNIX.Core.AiGateway
                 case "agentrouter":
                     var cp = settings.EndpointConfig(providerId);
                     creds.BaseUrl = cp != null ? cp.BaseUrl : null;
+                    creds.ApiType = cp != null ? cp.ApiType : null;
                     if (string.IsNullOrWhiteSpace(creds.Model))
                         creds.Model = cp != null ? cp.Model : null;
                     creds.ApiKey = SettingsManager.Instance.GetApiKey(providerId);

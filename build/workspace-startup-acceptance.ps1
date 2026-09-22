@@ -86,6 +86,18 @@ class WorkspaceStartupRegression {
             editor.Text="edited-model-id";
             Check(model.Text=="edited-model-id","Editable model binding failed");
             Contrast(editor.Foreground,editor.Background);
+            model.ItemsSource=new[]{"Custom Model"}; model.SelectedIndex=0;
+            var manual=(TextBox)settings.FindName("ManualModelBox"); manual.Text="private/ExactModel";
+            var effective=settings.GetType().GetProperty("EffectiveModelId",BindingFlags.NonPublic|BindingFlags.Instance);
+            Check((string)effective.GetValue(settings,null)=="private/ExactModel","Manual model ID was lost");
+            var busy=settings.GetType().GetMethod("SetProviderOperationBusy",BindingFlags.NonPublic|BindingFlags.Instance);
+            busy.Invoke(settings,new object[]{true}); Check(!manual.IsEnabled,"Manual model can change during diagnostics");
+            busy.Invoke(settings,new object[]{false}); Check(manual.IsEnabled,"Manual model stays disabled after diagnostics");
+            var discovered=(List<string>)settings.GetType().GetField("_discoveredModels",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(settings);
+            discovered.Clear(); discovered.AddRange(new[]{"CaseModel","casemodel"});
+            settings.GetType().GetMethod("RefreshModelOptions",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(settings,new object[]{"private/ExactModel"});
+            Check(model.Items.Contains("CaseModel") && model.Items.Contains("casemodel") && model.Text=="private/ExactModel","Catalog refresh changed model identity");
+
             var connectionButton=(Button)settings.FindName("TestButton");
             var modelButton=(Button)settings.FindName("TestModelButton");
             var verifyButton=(Button)settings.FindName("VerifyModelsButton");
@@ -320,7 +332,9 @@ class WorkspaceStartupRegression {
     }
     static void TransportRegression() {
         // Actual HTTP transport against a loopback fixture: no provider account or secret.
-        foreach(bool anthropic in new[]{false,true}) foreach(bool streaming in new[]{false,true}) {
+        foreach(bool anthropic in new[]{false,true}) foreach(int responseMode in new[]{0,1,2}) {
+            bool streaming=responseMode != 0;
+            bool serverStreams=responseMode == 1;
             var portPicker=new TcpListener(IPAddress.Loopback,0); portPicker.Start();
             int port=((IPEndPoint)portPicker.LocalEndpoint).Port; portPicker.Stop();
             using(var server=new HttpListener()) using(var timeout=new CancellationTokenSource(5000)) {
@@ -332,15 +346,17 @@ class WorkspaceStartupRegression {
                     using(var reader=new StreamReader(context.Request.InputStream)) {
                         string body=await reader.ReadToEndAsync(); Check(body.Contains("fixture-model") && body.Contains("Reply with OK."),"Diagnostic lost model or text");
                     }
-                    string reply=streaming
+                    string reply=serverStreams
                         ? (anthropic ? "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n" : "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\ndata: [DONE]\n\n")
                         : (anthropic ? "{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}" : "{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}");
-                    byte[] bytes=Encoding.UTF8.GetBytes(reply); context.Response.ContentType=streaming?"text/event-stream":"application/json";
+                    byte[] bytes=Encoding.UTF8.GetBytes(reply); context.Response.ContentType=serverStreams?"text/event-stream":"application/json";
                     context.Response.ContentLength64=bytes.Length; await context.Response.OutputStream.WriteAsync(bytes,0,bytes.Length); context.Response.Close();
                 });
-                var client=new OpenAiCompatibleClient(origin+"/v1","Fixture",null,anthropic);
+                var client=new CustomOpenAiCompatibleAdapter();
+                SettingsManager.Instance.Settings.EndpointConfig("custom").ApiType=anthropic?"OpenAI":"Anthropic";
+                client.Configure(new ProviderCredentials {BaseUrl=origin+"/v1",ApiKey="fixture-key",Model="fixture-model",ApiType=anthropic?"Anthropic":"OpenAI"});
                 var text=new StringBuilder(); Action<string> delta=streaming ? new Action<string>(x=>text.Append(x)) : null;
-                var answer=client.SendAsync(new ChatRequest{UserTurn=new ChatTurn{Role=ChatRole.User,Text="Reply with OK."}},"fixture-key","fixture-model",delta,timeout.Token).GetAwaiter().GetResult();
+                var answer=client.SendAsync(new ChatRequest{UserTurn=new ChatTurn{Role=ChatRole.User,Text="Reply with OK."}},delta,timeout.Token).GetAwaiter().GetResult();
                 serving.GetAwaiter().GetResult();
                 Check(answer.Text=="OK" && (!streaming || text.ToString()=="OK"),"Protocol response parsing failed");
             }
@@ -348,7 +364,9 @@ class WorkspaceStartupRegression {
 
         // Native tool transport contract: real tools/functionDeclarations must cross the provider
         // boundary and come back as structured ProviderToolCall objects, never only prompt text.
-        foreach(bool anthropic in new[]{false,true}) foreach(bool streaming in new[]{false,true}) {
+        foreach(bool anthropic in new[]{false,true}) foreach(int responseMode in new[]{0,1,2}) {
+            bool streaming=responseMode != 0;
+            bool serverStreams=responseMode == 1;
             var portPicker=new TcpListener(IPAddress.Loopback,0); portPicker.Start();
             int port=((IPEndPoint)portPicker.LocalEndpoint).Port; portPicker.Stop();
             using(var server=new HttpListener()) using(var timeout=new CancellationTokenSource(5000)) {
@@ -361,17 +379,17 @@ class WorkspaceStartupRegression {
                     }
 
                     string reply;
-                    if(!streaming && !anthropic)
+                    if(!serverStreams && !anthropic)
                         reply="{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"call1\",\"type\":\"function\",\"function\":{\"name\":\"omnix_tool\",\"arguments\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}]}}]}";
-                    else if(streaming && !anthropic)
+                    else if(serverStreams && !anthropic)
                         reply="data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call1\",\"function\":{\"name\":\"omnix_tool\",\"arguments\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}]}}]}\n\ndata: [DONE]\n\n";
-                    else if(!streaming)
+                    else if(!serverStreams)
                         reply="{\"content\":[{\"type\":\"tool_use\",\"id\":\"tool1\",\"name\":\"omnix_tool\",\"input\":{\"tool\":\"write_to_cell\",\"args\":{\"sheet\":\"Sheet1\",\"address\":\"B2\",\"value\":42}}}]}";
                     else
                         reply="data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool1\",\"name\":\"omnix_tool\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"tool\\\":\\\"write_to_cell\\\",\\\"args\\\":{\\\"sheet\\\":\\\"Sheet1\\\",\\\"address\\\":\\\"B2\\\",\\\"value\\\":42}}\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n";
 
                     byte[] bytes=Encoding.UTF8.GetBytes(reply);
-                    context.Response.ContentType=streaming?"text/event-stream":"application/json";
+                    context.Response.ContentType=serverStreams?"text/event-stream":"application/json";
                     context.Response.ContentLength64=bytes.Length;
                     await context.Response.OutputStream.WriteAsync(bytes,0,bytes.Length);
                     context.Response.Close();
