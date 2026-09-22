@@ -28,7 +28,7 @@ namespace OMNIX.Core.Ui
         private CancellationTokenSource _providerOperation;
         private readonly List<string> _discoveredModels = new List<string>();
         private readonly Dictionary<string, ModelVerificationResult> _modelVerification =
-            new Dictionary<string, ModelVerificationResult>(StringComparer.OrdinalIgnoreCase);
+            new Dictionary<string, ModelVerificationResult>(StringComparer.Ordinal);
 
         private static readonly string[] AllowedOfficialHosts =
         {
@@ -243,6 +243,7 @@ namespace OMNIX.Core.Ui
             WorkingModelsOnlyCheck.IsEnabled = !busy;
             CancelTestButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             ModelCombo.IsEnabled = !busy;
+            ManualModelBox.IsEnabled = !busy;
             ApiKeyBox.IsEnabled = !busy;
             CustomNameBox.IsEnabled = !busy;
             CustomBaseUrlBox.IsEnabled = !busy;
@@ -352,7 +353,7 @@ namespace OMNIX.Core.Ui
                 string current = EffectiveModelId;
                 _discoveredModels.Clear();
                 _discoveredModels.AddRange(models.Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase));
+                    .Distinct(StringComparer.Ordinal));
                 _modelVerification.Clear();
                 WorkingModelsOnlyCheck.IsChecked = false;
                 WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
@@ -708,10 +709,12 @@ namespace OMNIX.Core.Ui
             var customConfig = settings.EndpointConfig(_displayedProviderId);
             if (customConfig != null && (_displayedProviderId == "custom" || _displayedProviderId == "agentrouter"))
             {
-                customConfig.ApiType = CustomApiTypeCombo.SelectedIndex == 1 ? "Anthropic" : "OpenAI";
-                if (!string.Equals(customConfig.BaseUrl, CustomBaseUrlBox.Text.Trim(), StringComparison.Ordinal) ||
+                string apiType = CustomApiTypeCombo.SelectedIndex == 1 ? "Anthropic" : "OpenAI";
+                if (!string.Equals(customConfig.ApiType, apiType, StringComparison.Ordinal) ||
+                    !string.IsNullOrWhiteSpace(ApiKeyBox.Password) || !string.Equals(customConfig.BaseUrl, CustomBaseUrlBox.Text.Trim(), StringComparison.Ordinal) ||
                     (!string.Equals(customConfig.Model, EffectiveModelId, StringComparison.Ordinal)))
                     customConfig.SupportsVision = null;
+                customConfig.ApiType = apiType;
                 customConfig.Name = CustomNameBox.Text.Trim();
                 customConfig.BaseUrl = CustomBaseUrlBox.Text.Trim();
                 customConfig.Model = EffectiveModelId;

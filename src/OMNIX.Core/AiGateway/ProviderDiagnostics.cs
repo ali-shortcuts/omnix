@@ -329,7 +329,7 @@ namespace OMNIX.Core.AiGateway
         {
             var models = (modelIds ?? Enumerable.Empty<string>())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.Ordinal)
                 .Take(MaxModelsToVerify)
                 .ToList();
 
@@ -407,6 +407,7 @@ namespace OMNIX.Core.AiGateway
             {
                 ApiKey = source != null ? source.ApiKey : null,
                 BaseUrl = source != null ? source.BaseUrl : null,
+                ApiType = source != null ? source.ApiType : null,
                 Model = model ?? ""
             };
         }

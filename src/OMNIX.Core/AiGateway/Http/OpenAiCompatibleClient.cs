@@ -359,7 +359,12 @@ namespace OMNIX.Core.AiGateway.Http
                         var nativeCalls = new List<ProviderToolCall>();
                         string model = _configuredModel;
 
-                        if (onDelta == null)
+                        // Some compatible gateways return JSON even when stream=true.
+                        string mediaType = response.Content.Headers.ContentType != null
+                            ? response.Content.Headers.ContentType.MediaType : null;
+                        bool jsonResponse = string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+                            (mediaType != null && mediaType.EndsWith("+json", StringComparison.OrdinalIgnoreCase));
+                        if (onDelta == null || jsonResponse)
                         {
                             string full = await ReadBodyBoundedAsync(response.Content, MaxJsonBodyBytes, ct).ConfigureAwait(false);
                             var root = JObject.Parse(full);
@@ -381,6 +386,7 @@ namespace OMNIX.Core.AiGateway.Http
                             if (text.Length > MaxAssistantChars)
                                 throw OmnixException.Provider(_providerDisplayName + " returned an over-sized assistant response.");
                             sb.Append(text);
+                            if (onDelta != null && !string.IsNullOrEmpty(text)) onDelta(text);
                         }
                         else
                         {
@@ -492,6 +498,9 @@ namespace OMNIX.Core.AiGateway.Http
                             }
                             nativeCalls.AddRange(MaterializeStreamingCalls(accumulators));
                         }
+
+                        if (sb.Length == 0 && nativeCalls.Count == 0)
+                            throw OmnixException.Provider(_providerDisplayName + " returned no assistant text or tool calls. Check the model and endpoint protocol.");
 
                         if (nativeCalls.Count > 0)
                             Logger.Gateway("Provider response contains native tool call(s): count=" + nativeCalls.Count +
