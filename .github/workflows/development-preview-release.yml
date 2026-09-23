@@ -358,6 +358,21 @@ jobs:
             --notes-file release-input/RELEASE-NOTES.md \
             --prerelease
 
+      - name: Remove superseded preview 62 and 63 after verified publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ steps.meta.outputs.tag }}'
+          # This is a deliberately scoped user-requested cleanup, not blanket branch/release deletion.
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets,tagName > published-release.json
+          jq -e --arg tag "$tag" '.tagName == $tag and (.assets | any(.name == "OMNIX-AI-OFFICE-Setup-DEV.exe" and .size > 0)) and (.assets | any(.name == "OMNIX-complete-source.zip" and .size > 0)) and (.assets | any(.name == "ci-provenance.json" and .size > 0))' published-release.json >/dev/null
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease > existing-releases.json
+          for old_tag in v4.0.0-preview.62 v4.0.0-preview.63; do
+            if [[ "$old_tag" != "$tag" ]] && jq -e --arg old "$old_tag" 'any(.tagName == $old and .isPrerelease)' existing-releases.json >/dev/null; then
+              gh release delete "$old_tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            fi
+          done
+
       - name: Report published preview
         shell: bash
         run: |
