@@ -103,7 +103,6 @@ namespace OMNIX.Core.Ui
                 WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
                 ModelVerificationScroll.Visibility = Visibility.Collapsed;
                 ModelVerificationText.Text = "";
-            VerifiedModelsPanel.Children.Clear();
                 VerifiedModelsPanel.Children.Clear();
                 CloudflareAccountBox.Text = settings.CloudflareAccountId ?? "";
                 ConfirmWritesCheck.IsChecked = settings.ConfirmEveryWrite;
@@ -387,7 +386,7 @@ namespace OMNIX.Core.Ui
                 WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
                 ModelVerificationScroll.Visibility = Visibility.Collapsed;
                 ModelVerificationText.Text = "";
-            VerifiedModelsPanel.Children.Clear();
+                VerifiedModelsPanel.Children.Clear();
                 RefreshModelOptions(current);
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
@@ -644,19 +643,6 @@ namespace OMNIX.Core.Ui
 
             int working = ordered.Count(x => x.Working);
             int textOnly = ordered.Count(x => x.State == ModelVerificationState.TextOnly);
-            int denied = ordered.Count(x => x.State == ModelVerificationState.AccessDenied);
-            int unavailable = ordered.Count(x => x.State == ModelVerificationState.NotFoundOrUnavailable);
-            int limited = ordered.Count(x => x.State == ModelVerificationState.RateLimited);
-            int incompatible = ordered.Count(x => x.State == ModelVerificationState.Incompatible);
-            int timedOut = ordered.Count(x => x.State == ModelVerificationState.TimedOut);
-
-            var lines = new List<string>
-            {
-                "Progress " + completed + "/" + total + " · tool-compatible=" + working +
-                " · text-only=" + textOnly + " · denied=" + denied + " · unavailable=" + unavailable +
-                " · rate-limited=" + limited + " · incompatible=" + incompatible +
-                " · timeout=" + timedOut
-            };
             ModelVerificationText.Text = completed + "/" + total + " · tools " + working + " · text " + textOnly;
             VerifiedModelsPanel.Children.Clear();
             foreach (var result in ordered)
