@@ -55,7 +55,7 @@ namespace OMNIX.Core.Settings
                 if (!File.Exists(_path))
                 {
                     Settings = OmnixSettings.CreateDefaults();
-                    Logger.Startup("settings.dat not found — defaults created (privacy=AskBeforeSending)");
+                    Logger.Startup("settings.dat not found — defaults created (privacy=CloudAllowed)");
                     return;
                 }
 
@@ -189,6 +189,13 @@ namespace OMNIX.Core.Settings
                 changed = true;
             }
 
+            if (Settings.SavedModels == null)
+            {
+                Settings.SavedModels = new Dictionary<string, List<string>>();
+                Settings.ExecutionStepDelayMs = 350;
+                Settings.BusinessLocale = "Afghanistan; Dari; currency AFN";
+                changed = true;
+            }
             return changed;
         }
 

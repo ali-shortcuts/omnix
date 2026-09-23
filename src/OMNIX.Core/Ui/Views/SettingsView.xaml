@@ -220,8 +220,11 @@
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
             <ScrollViewer x:Name="ModelVerificationScroll" Visibility="Collapsed" MaxHeight="120"
                           VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
-                <TextBlock x:Name="ModelVerificationText" FontSize="10.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource B.ForegroundDim}" />
+                <StackPanel>
+                    <TextBlock x:Name="ModelVerificationText" FontSize="10.5" TextWrapping="Wrap"
+                               Foreground="{DynamicResource B.ForegroundDim}" />
+                    <StackPanel x:Name="VerifiedModelsPanel" />
+                </StackPanel>
             </ScrollViewer>
 
             <!-- ============ Local AI ============ -->
@@ -243,6 +246,10 @@
 
             </StackPanel>
             <Expander x:Name="GeneralSettingsExpander" Header="General settings" Foreground="{DynamicResource B.Foreground}" Margin="0,12,0,0"><StackPanel>
+            <TextBlock Text="Execution" Style="{StaticResource Section}" />
+            <CheckBox x:Name="VisibleStepsCheck" Content="Show steps slowly" Foreground="{DynamicResource B.Foreground}" />
+            <TextBlock Text="Business defaults" Style="{StaticResource Section}" />
+            <TextBox x:Name="BusinessLocaleBox" Style="{StaticResource Input}" />
             <!-- ============ Privacy ============ -->
             <TextBlock Text="Privacy" Style="{StaticResource Section}" />
             <RadioButton x:Name="PrivacyLocalOnly" Style="{StaticResource Radio}"

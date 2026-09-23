@@ -36,6 +36,12 @@ namespace OMNIX.Core.Tools
             }
 
             ValidateSheetName((string)plan["sheet"]);
+            if (plan["title"] != null && (plan["title"].Type != JTokenType.String || ((string)plan["title"]).Length > 200))
+                throw new ArgumentException("title must be text of at most 200 characters.");
+            int firstRow = HeaderRow(plan);
+            if (firstRow < 1 || firstRow > 100) throw new ArgumentException("startRow must be between 1 and 100.");
+            if (!string.IsNullOrWhiteSpace((string)plan["title"]) && firstRow < 3)
+                throw new ArgumentException("A separate title requires startRow >= 3.");
 
             var headers = plan["headers"] as JArray;
             var rows = plan["rows"] as JArray;
@@ -63,6 +69,14 @@ namespace OMNIX.Core.Tools
             }
 
             return plan;
+        }
+
+        public static int HeaderRow(JObject plan)
+        {
+            if (plan["startRow"] != null && plan["startRow"].Type != JTokenType.Integer)
+                throw new ArgumentException("startRow must be an integer.");
+            return plan["startRow"] != null ? (int)plan["startRow"] :
+                string.IsNullOrWhiteSpace((string)plan["title"]) ? 1 : 4;
         }
 
         private static void ValidateCell(JToken value)
@@ -184,6 +198,7 @@ namespace OMNIX.Core.Tools
             // choose a different destination after the user has reviewed the preview.
             plan["sheet"] = resolved;
             plan["uniqueName"] = false;
+            plan["startRow"] = HeaderRow(plan);
 
             var headers = (JArray)plan["headers"];
             var rows = (JArray)plan["rows"];
@@ -223,12 +238,26 @@ namespace OMNIX.Core.Tools
                 created = (Excel.Worksheet)wb.Worksheets.Add(After: wb.Sheets[wb.Sheets.Count]);
                 created.Name = sheetName;
 
+                int headerRow = HeaderRow(plan);
+                string title = (string)plan["title"];
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    var heading = created.Range["A1"].Resize[1, headers.Count];
+                    heading.Merge();
+                    heading.NumberFormat = "@";
+                    heading.Value2 = title;
+                    heading.Font.Size = 18;
+                    heading.Font.Bold = true;
+                    heading.HorizontalAlignment = Excel.XlHAlign.xlHAlignCenter;
+                    heading.RowHeight = 32;
+                    heading.Borders.LineStyle = Excel.XlLineStyle.xlContinuous;
+                }
                 int dataRowCount = Math.Max(1, rows.Count);
-                var area = created.Range["A1"].Resize[dataRowCount + 1, headers.Count];
+                var area = ((Excel.Range)created.Cells[headerRow, 1]).Resize[dataRowCount + 1, headers.Count];
 
                 for (int c = 0; c < headers.Count; c++)
                 {
-                    var cell = (Excel.Range)created.Cells[1, c + 1];
+                    var cell = (Excel.Range)created.Cells[headerRow, c + 1];
                     cell.NumberFormat = "@";
                     cell.Value2 = (string)headers[c];
                 }
@@ -237,7 +266,7 @@ namespace OMNIX.Core.Tools
                 {
                     for (int c = 0; c < headers.Count; c++)
                     {
-                        var cell = (Excel.Range)created.Cells[y + 2, c + 1];
+                        var cell = (Excel.Range)created.Cells[headerRow + 1 + y, c + 1];
                         WriteCell(cell, rows[y][c]);
                     }
                 }
@@ -250,7 +279,7 @@ namespace OMNIX.Core.Tools
                     Type.Missing);
                 table.TableStyle = "TableStyleMedium2";
 
-                created.Range["A1"].Resize[1, headers.Count].WrapText = true;
+                ((Excel.Range)created.Cells[headerRow, 1]).Resize[1, headers.Count].WrapText = true;
                 area.Columns.AutoFit();
                 for (int c = 1; c <= headers.Count; c++)
                 {
@@ -258,13 +287,13 @@ namespace OMNIX.Core.Tools
                     if (Convert.ToDouble(column.ColumnWidth) > 36d) column.ColumnWidth = 36d;
                     else if (Convert.ToDouble(column.ColumnWidth) < 10d) column.ColumnWidth = 10d;
                 }
-                created.Range["A1"].Resize[1, headers.Count].EntireRow.AutoFit();
+                ((Excel.Range)created.Cells[headerRow, 1]).Resize[1, headers.Count].EntireRow.AutoFit();
 
                 for (int y = 0; y < rows.Count; y++)
                 {
                     for (int c = 0; c < headers.Count; c++)
                     {
-                        var cell = (Excel.Range)created.Cells[y + 2, c + 1];
+                        var cell = (Excel.Range)created.Cells[headerRow + 1 + y, c + 1];
                         VerifyCell(cell, rows[y][c]);
                     }
                 }
@@ -275,7 +304,7 @@ namespace OMNIX.Core.Tools
 
                 for (int c = 0; c < headers.Count; c++)
                 {
-                    if (Convert.ToString(((Excel.Range)created.Cells[1, c + 1]).Value2) != (string)headers[c])
+                    if (Convert.ToString(((Excel.Range)created.Cells[headerRow, c + 1]).Value2) != (string)headers[c])
                         throw new InvalidOperationException("Table header verification failed.");
                 }
 

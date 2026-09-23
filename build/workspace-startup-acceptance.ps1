@@ -98,6 +98,24 @@ class WorkspaceStartupRegression {
             settings.GetType().GetMethod("RefreshModelOptions",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(settings,new object[]{"private/ExactModel"});
             Check(model.Items.Contains("CaseModel") && model.Items.Contains("casemodel") && model.Text=="private/ExactModel","Catalog refresh changed model identity");
 
+            var verified=(Dictionary<string,ModelVerificationResult>)settings.GetType().GetField("_modelVerification",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(settings);
+            verified.Clear();
+            verified["working-model"]=new ModelVerificationResult {ModelId="working-model",State=ModelVerificationState.Working,ToolCallingVerified=true};
+            verified["text-model"]=new ModelVerificationResult {ModelId="text-model",State=ModelVerificationState.TextOnly};
+            verified["denied-model"]=new ModelVerificationResult {ModelId="denied-model",State=ModelVerificationState.AccessDenied};
+            settings.GetType().GetMethod("RenderVerificationSummary",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(settings,new object[]{3,3});
+            var choices=(StackPanel)settings.FindName("VerifiedModelsPanel");
+            Check(choices.Children.Count==3,"Verified model choices missing");
+            foreach(StackPanel row in choices.Children) {
+                var button=(Button)row.Children[1];
+                if((string)button.Content=="working-model") {
+                    button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    Check(model.Text=="working-model","Verified model click did not select model");
+                    Check(SettingsManager.Instance.Settings.SavedModels["custom"].Contains("working-model"),"Verified choice not retained");
+                }
+                if((string)button.Content=="denied-model") Check(!button.IsEnabled,"Denied model is selectable");
+            }
+
             var connectionButton=(Button)settings.FindName("TestButton");
             var modelButton=(Button)settings.FindName("TestModelButton");
             var verifyButton=(Button)settings.FindName("VerifyModelsButton");
@@ -485,6 +503,11 @@ class WorkspaceStartupRegression {
             string faReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "fa");
             string enReference = OMNIX.Core.Reference.OfficeReference.Search("Excel", "SUM", 0, "en");
             Check(!string.IsNullOrWhiteSpace(faReference) && faReference != enReference && faReference.Contains("Excel") && faReference.Contains("Microsoft"), "Persian reference mode missing");
+            Check(OmnixSettings.CreateDefaults().Privacy==PrivacyMode.CloudAllowed,"Fresh install cloud default incorrect");
+            var titled=ExcelTableBuilder.ValidatePlan("{\"sheet\":\"Gold\",\"title\":\"Shop\",\"headers\":[\"Weight\",\"Total\"],\"rows\":[[5,{\"formula\":\"=A5*2\"}]]}");
+            Check(ExcelTableBuilder.HeaderRow(titled)==4,"Separate heading did not reserve rows above table");
+            try { ExcelTableBuilder.ValidatePlan("{\"sheet\":\"Gold\",\"title\":\"Shop\",\"startRow\":1,\"headers\":[\"A\"],\"rows\":[]}"); throw new Exception("Overlapping heading accepted"); } catch(ArgumentException) {}
+            Check(OfficeCapabilityRegistry.Exists(HostType.Excel,"sheet.heading"),"Native heading capability unavailable");
             TransportRegression();
             AsyncContextRegression();
             CapabilityRegression();

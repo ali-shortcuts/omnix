@@ -30,6 +30,7 @@ namespace OMNIX.Core.AiGateway
                 new CustomOpenAiCompatibleAdapter("agentrouter"),
                 new CompatiblePresetAdapter("sambanova", "SambaNova", "https://api.sambanova.ai/v1", "https://docs.sambanova.ai/docs/en/get-started/api-keys-urls", "https://cloud.sambanova.ai/"),
                 new CompatiblePresetAdapter("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "https://docs.api.nvidia.com/nim/reference/llm-apis", "https://build.nvidia.com/"),
+                new CompatiblePresetAdapter("siliconflow", "SiliconFlow", "https://api.siliconflow.com/v1", "https://docs.siliconflow.com/en/userguide/quickstart", "https://cloud.siliconflow.com/"),
                 new GeminiAdapter(),
                 new GroqAdapter(),
                 new OpenRouterAdapter(),
@@ -42,7 +43,7 @@ namespace OMNIX.Core.AiGateway
             _localAvailability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             ApplyOfficialMetadata();
             var names = new Dictionary<string, string> {
-                { "custom", "Custom Provider" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
+                { "siliconflow", "SiliconFlow" }, { "custom", "Custom Provider" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
                 { "openrouter", "OpenRouter" }, { "mistral", "Mistral" },
                 { "huggingface", "Hugging Face" }, { "cerebras", "Cerebras" },
                 { "ollama", "Ollama" }, { "lmstudio", "LM Studio" }
@@ -52,6 +53,11 @@ namespace OMNIX.Core.AiGateway
 
         private void ApplyOfficialMetadata()
         {
+            SetMetadata("siliconflow", "https://www.siliconflow.com/",
+                "https://docs.siliconflow.com/en/userguide/quickstart", "https://cloud.siliconflow.com/", "",
+                ProviderAccessProfile.FreeModelsAvailable,
+                "Selected models are free with rate limits; check current model pricing. Paid models are also listed.",
+                "https://docs.siliconflow.com/en/userguide/rate-limits/rate-limit-and-upgradation", "2026-09-23");
             SetMetadata("gemini",
                 "https://ai.google.dev/gemini-api/docs",
                 "https://ai.google.dev/gemini-api/docs/get-started",

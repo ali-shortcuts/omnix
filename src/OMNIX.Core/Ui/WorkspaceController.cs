@@ -253,7 +253,23 @@ namespace OMNIX.Core.Ui
             _cts = requestCts;
             var ct = requestCts.Token;
             var sb = new System.Text.StringBuilder();
+            var pendingDeltas = new System.Text.StringBuilder();
+            var deltaGate = new object();
             bool acceptDeltas = true;
+            Action flushDeltas = () =>
+            {
+                string chunk;
+                lock (deltaGate) { chunk = pendingDeltas.ToString(); pendingDeltas.Clear(); }
+                if (chunk.Length == 0 || _disposed || !IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
+                sb.Append(chunk);
+                bubble.AppendStreamingText(chunk);
+            };
+            var streamTimer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background, View.Dispatcher);
+            streamTimer.Interval = TimeSpan.FromMilliseconds(150);
+            streamTimer.Tick += (sender, args) => flushDeltas();
+            bubble.ReplaceText("");
+            streamTimer.Start();
 
             // AiGateway owns the provider/tool loop, while this per-window executor owns the
             // Office boundary. The validator performs a deep Office identity check only when a
@@ -276,23 +292,19 @@ namespace OMNIX.Core.Ui
                     _adapter,
                     delta =>
                     {
-                        // Network adapters may emit deltas from a non-UI continuation. Never call
-                        // Office COM here. The version check is in-memory and the UI update is
-                        // dispatched only while the originating document scope remains valid.
-                        if (!acceptDeltas || !IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
-                        var dispatcher = View.Dispatcher;
-                        if (dispatcher.HasShutdownStarted) return;
-                        dispatcher.BeginInvoke(new Action(delegate
+                        // Coalesce transport chunks without scheduling a UI operation per token.
+                        // Office COM remains on its owner thread; only text crosses this boundary.
+                        lock (deltaGate)
                         {
-                            if (!acceptDeltas || !IsRequestScopeVersionValid(requestDocKey, requestScopeVersion)) return;
-                            sb.Append(delta);
-                            bubble.ReplaceText(sb.ToString());
-                        }));
+                            if (acceptDeltas) pendingDeltas.Append(delta);
+                        }
                     },
                     _toolExecutor,
                     ct).ConfigureAwait(true);
 
-                acceptDeltas = false;
+                lock (deltaGate) { acceptDeltas = false; }
+                streamTimer.Stop();
+                flushDeltas();
                 // A provider can race cancellation and return a completed response. Re-check both
                 // token and actual Office document identity before touching UI/history after await.
                 ct.ThrowIfCancellationRequested();
@@ -319,6 +331,9 @@ namespace OMNIX.Core.Ui
                 // write a late cancellation bubble/history entry into a closed or different doc.
                 if (_disposed || !ValidateCurrentOfficeDocumentScope(requestDocKey, requestScopeVersion)) return;
 
+                lock (deltaGate) { acceptDeltas = false; }
+                streamTimer.Stop();
+                flushDeltas();
                 // A user pressing Stop in the SAME document remains a normal visible cancellation.
                 assistantTurn.Text = sb.ToString() + Environment.NewLine + Localization.Strings.T("S.Chat.Cancelled");
                 bubble.ReplaceText(assistantTurn.Text);
@@ -340,7 +355,9 @@ namespace OMNIX.Core.Ui
             }
             finally
             {
-                acceptDeltas = false;
+                lock (deltaGate) { acceptDeltas = false; }
+                streamTimer.Stop();
+                lock (deltaGate) { pendingDeltas.Clear(); }
                 _busy = false;
 
                 // Clear request bindings only if they still belong to this request. A controller

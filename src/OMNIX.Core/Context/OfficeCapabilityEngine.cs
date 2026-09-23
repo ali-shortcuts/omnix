@@ -81,6 +81,7 @@ namespace OMNIX.Core.Context
             x.Add(C(HostType.Excel,"worksheet.move","Worksheet","Move a worksheet to a one-based position.","sheet,index"));
             x.Add(C(HostType.Excel,"worksheet.visibility","Worksheet","Show, hide, or very-hide a worksheet.","sheet,state=visible|hidden|veryHidden"));
             x.Add(C(HostType.Excel,"worksheet.tab_color","Worksheet","Set worksheet tab color.","sheet,color=#RRGGBB"));
+            x.Add(C(HostType.Excel,"sheet.heading","Layout","Create a separate framed title in an EMPTY range above the data table. Refuses to overwrite content.","sheet,address,text"));
             x.Add(C(HostType.Excel,"range.clear_contents","Range","Clear values/formulas but keep formatting.","sheet,address"));
             x.Add(C(HostType.Excel,"range.clear_formats","Range","Clear formatting but keep values/formulas.","sheet,address"));
             x.Add(C(HostType.Excel,"range.insert_rows","Range","Insert entire rows at the target.","sheet,address"));
@@ -243,6 +244,21 @@ namespace OMNIX.Core.Context
                 case "worksheet.move": sheet().Move(Before:wb.Sheets[CapabilityArgs.I(a,"index",1,1,wb.Sheets.Count)]); break;
                 case "worksheet.visibility": { string state=CapabilityArgs.S(a,"state","visible").ToLowerInvariant(); sheet().Visible=state=="visible"?Excel.XlSheetVisibility.xlSheetVisible:state=="hidden"?Excel.XlSheetVisibility.xlSheetHidden:state=="veryhidden"?Excel.XlSheetVisibility.xlSheetVeryHidden:throw new ArgumentException("state must be visible, hidden, or veryHidden."); break; }
                 case "worksheet.tab_color": sheet().Tab.Color=CapabilityArgs.ColorOle(CapabilityArgs.S(a,"color","")); break;
+                case "sheet.heading": {
+                    var r=range(); string text=CapabilityArgs.S(a,"text","");
+                    if(text.Length==0 || text.Length>200 || r.Rows.Count>3 || r.Columns.Count>24)
+                        throw new ArgumentException("Heading requires text up to 200 characters and a range of at most 3 rows by 24 columns.");
+                    foreach(Excel.Range cell in r.Cells)
+                        if(cell.Value2!=null || Convert.ToBoolean(cell.HasFormula))
+                            throw new InvalidOperationException("Heading target is not empty. Choose empty rows above the table; do not overwrite data.");
+                    r.Merge(); r.NumberFormat="@"; r.Value2=text; r.Font.Bold=true; r.Font.Size=18;
+                    r.HorizontalAlignment=Excel.XlHAlign.xlHAlignCenter;
+                    r.VerticalAlignment=Excel.XlVAlign.xlVAlignCenter;
+                    r.RowHeight=32; r.Borders.LineStyle=Excel.XlLineStyle.xlContinuous;
+                    if(Convert.ToString(((Excel.Range)r.Cells[1,1]).Value2)!=text)
+                        throw new InvalidOperationException("Heading read-back verification failed.");
+                    break;
+                }
                 case "range.clear_contents": range().ClearContents(); break;
                 case "range.clear_formats": range().ClearFormats(); break;
                 case "range.insert_rows": range().EntireRow.Insert(Excel.XlInsertShiftDirection.xlShiftDown); break;
