@@ -21,6 +21,8 @@ namespace OMNIX.Core.Tools
     public sealed class ToolExecutor
     {
         /// <summary>UI wires this: returns true when the user confirmed the change.</summary>
+        public Agent.ExecutionPlan Execution { get; private set; } = new Agent.ExecutionPlan();
+
         public Func<string, string> ConversationSearch { get; set; }
 
         public Func<WritePreview, Task<bool>> WriteConfirmation { get; set; }
@@ -126,6 +128,15 @@ namespace OMNIX.Core.Tools
 
             switch (call.Name)
             {
+                case ToolNames.GetOfficeTemplate:
+                    var templateArgs = Newtonsoft.Json.Linq.JObject.Parse(call.ArgumentsJson ?? "{}");
+                    return ToolResult.Ok(Agent.OfficePlaybooks.Template((string)templateArgs["name"], (string)templateArgs["sheet"], adapter.Host));
+                case ToolNames.SubmitExecutionPlan:
+                    return ToolResult.Ok(Execution.Submit(call.ArgumentsJson, adapter.Host));
+                case ToolNames.VerifyExecutionPlan:
+                    var verifier = adapter as Agent.IPlanVerificationHost;
+                    if (verifier == null) return ToolResult.Fail("Native plan verification is unavailable.");
+                    return ToolResult.Ok(Execution.VerifyAll(verifier));
                 case ToolNames.ReadOfficeAccess:
                 {
                     var access = adapter as IOfficeAccessHost;
@@ -221,6 +232,8 @@ namespace OMNIX.Core.Tools
         {
             EnsureRequestScope(ct);
 
+            string rejection = Execution.BeforeWrite(call);
+            if (rejection != null) return ToolResult.Fail(rejection);
             WritePreview preview;
             long previewTimer = RuntimeDiagnosticJournal.StartTimer();
             RuntimeDiagnosticJournal.Event("write_preview_start", call.Name, "start", null, null, null);
@@ -314,7 +327,9 @@ namespace OMNIX.Core.Tools
                 : call.Name == ToolNames.ExecuteOfficeCapability
                     ? "Office capability applied through the active host's validated Object Model implementation."
                     : Localization.Strings.T("S.Tools.Applied");
-            return ToolResult.Ok("CHANGE APPLIED. " + hint, hint);
+            var verifier = adapter as Agent.IPlanVerificationHost;
+            string verification = verifier != null ? Execution.AfterWrite(verifier) : "";
+            return ToolResult.Ok("CHANGE APPLIED. " + hint + "\n" + verification, hint);
         }
 
 

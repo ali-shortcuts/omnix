@@ -12,7 +12,7 @@ namespace OMNIX.Core.Context
     /// PowerPoint adapter (spec Section 3, Layer 3): Presentation, current slide as image for
     /// Vision, speaker notes, shapes/text. Write tools: insert_slide, add_speaker_notes.
     /// </summary>
-    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost, IOfficeAccessHost
+    public sealed class PowerPointHostAdapter : IHostAdapter, IIndexedHostAdapter, IVisibleOfficeExecutionHost, IOfficeCapabilityHost, IOfficeAccessHost, Agent.IPlanVerificationHost
     {
         private const int MaxSlideTitleChars = 500;
         private const int MaxSlideBodyChars = 20000;
@@ -31,6 +31,8 @@ namespace OMNIX.Core.Context
 
         public HostType Host { get { return HostType.PowerPoint; } }
         public string HostDisplayName { get { return "PowerPoint"; } }
+
+        public string CheckPostcondition(Newtonsoft.Json.Linq.JObject check) { return Agent.OfficePostconditions.PowerPointCheck(_app, check); }
 
         public string ReadOfficeAccess()
         {

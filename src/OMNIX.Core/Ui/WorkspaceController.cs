@@ -289,6 +289,11 @@ namespace OMNIX.Core.Ui
 
             try
             {
+                var checkpointKey = requestDocKey + "|execution-plan";
+                var checkpoints = _historyStore.Load(checkpointKey);
+                _toolExecutor.Execution.PreviousCheckpoint = checkpoints.Count == 0 ? null : checkpoints[checkpoints.Count - 1].Text;
+                _toolExecutor.Execution.SaveCheckpoint = text => _historyStore.Save(checkpointKey,
+                    new List<ChatTurn> { new ChatTurn { Role = ChatRole.Assistant, Text = text, TimestampUtc = DateTime.UtcNow } });
                 var request = new ChatRequest
                 {
                     SystemPrompt = AiGateway.AiGateway.BuildSystemPrompt(_adapter, _adapter.ReadContext()),
@@ -385,6 +390,7 @@ namespace OMNIX.Core.Ui
                 // currently permits one request at a time, but reference checks keep this robust if
                 // that UI policy changes later.
                 if (ReferenceEquals(_cts, requestCts)) _cts = null;
+                _toolExecutor.Execution.SaveCheckpoint = null;
                 _toolExecutor.RequestCancellationTokenProvider = null;
                 _toolExecutor.RequestScopeValidator = null;
                 try { requestCts.Dispose(); } catch { }
@@ -425,6 +431,7 @@ namespace OMNIX.Core.Ui
             if (_disposed || _busy) return;
             _turns = new List<ChatTurn>();
             _historyStore.Delete(_docKey);
+            _historyStore.Delete(_docKey + "|execution-plan");
             _gateway.Privacy.ResetSession();
             View.Chat.ReloadMessages(_turns);
             View.Chat.SetStatus(Localization.Strings.T("S.Chat.Cleared"));

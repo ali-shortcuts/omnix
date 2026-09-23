@@ -209,6 +209,52 @@ class WorkspaceStartupRegression {
         }
     }
 
+    sealed class PlanProbe : OMNIX.Core.Agent.IPlanVerificationHost {
+        public bool First = true;
+        public bool Second = true;
+        public string CheckPostcondition(Newtonsoft.Json.Linq.JObject check) {
+            return ((string)check["address"] == "A1" ? First : Second) ? null : "Wrong native value";
+        }
+    }
+    static void ExecutionPlanRegression() {
+        var plan = new OMNIX.Core.Agent.ExecutionPlan();
+        plan.Begin("write two cells", true);
+        var first = new ToolCall { Name = ToolNames.WriteToCell, ArgumentsJson = "{\"sheet\":\"Sheet1\",\"address\":\"A1\",\"value\":1}" };
+        Check(plan.BeforeWrite(first) != null, "Unplanned write accepted");
+        string json = "{\"steps\":[{\"id\":\"one\",\"tool\":\"write_to_cell\",\"args\":{\"sheet\":\"Sheet1\",\"address\":\"A1\",\"value\":1},\"checks\":[{\"kind\":\"cell_value\",\"sheet\":\"Sheet1\",\"address\":\"A1\",\"value\":1}]},{\"id\":\"two\",\"tool\":\"write_to_cell\",\"args\":{\"sheet\":\"Sheet1\",\"address\":\"A2\",\"value\":2},\"checks\":[{\"kind\":\"cell_value\",\"sheet\":\"Sheet1\",\"address\":\"A2\",\"value\":2}]}]}";
+        plan.Submit(json, HostType.Excel);
+        var probe = new PlanProbe();
+        Check(plan.BeforeWrite(new ToolCall { Name=ToolNames.WriteToCell, ArgumentsJson="{}" }) != null, "Mismatched plan arguments accepted");
+        Check(plan.BeforeWrite(first) == null, "Exact planned write rejected");
+        plan.AfterWrite(probe);
+        Check(!plan.Complete, "Partial plan reported complete");
+        bool rejected = false;
+        try { plan.Submit(json.Replace("\"checks\":[", "\"checks\":[],\"ignored\":["), HostType.Excel); } catch(ArgumentException) { rejected=true; }
+        Check(rejected, "Acceptance criteria were weakened after applying a write");
+        var second = new ToolCall { Name=ToolNames.WriteToCell, ArgumentsJson="{\"sheet\":\"Sheet1\",\"address\":\"A2\",\"value\":2}" };
+        Check(plan.BeforeWrite(second) == null, "Next planned write rejected");
+        probe.First=false;
+        plan.AfterWrite(probe);
+        Check(!plan.Complete, "Later write invalidated an earlier step without detection");
+        probe.First=true;
+        plan.VerifyAll(probe);
+        Check(plan.Complete, "Native postconditions did not complete plan");
+        Check(plan.BeforeWrite(first)!=null, "Completed writes replayed");
+        Check(!OMNIX.Core.Agent.OfficePostconditions.ValuesEqual("5",new Newtonsoft.Json.Linq.JValue(5)), "Numeric text accepted as a real number");
+        Check(OMNIX.Core.Agent.OfficePostconditions.ValuesEqual(5.0,new Newtonsoft.Json.Linq.JValue(5)), "Equivalent numeric value rejected");
+        foreach(string name in new[]{"gold","inventory","invoice"}) {
+            var template=OMNIX.Core.Agent.OfficePlaybooks.Template(name,"Demo",HostType.Excel);
+            var templatePlan=Newtonsoft.Json.Linq.JObject.Parse(template);
+            ExcelTableBuilder.ValidatePlan(templatePlan["steps"][0]["args"].ToString());
+            var candidate=new OMNIX.Core.Agent.ExecutionPlan(); candidate.Begin("demo",true); candidate.Submit(template,HostType.Excel);
+        }
+        foreach(var host in new[]{HostType.Excel,HostType.Word,HostType.PowerPoint})
+            Check(OMNIX.Core.Agent.OfficePlaybooks.Load(host,"gold shop").Contains("BUSINESS TASK GUIDE"), "Selective embedded playbook missing");
+        plan.SaveCheckpoint = text => { throw new IOException("disk unavailable"); };
+        plan.VerifyAll(probe);
+        Check(plan.Complete, "Checkpoint failure changed native verification result");
+    }
+
     static void NativeGatewayRegression() {
         var settings=SettingsManager.Instance.Settings;
         var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
@@ -574,6 +620,7 @@ class WorkspaceStartupRegression {
             AsyncContextRegression();
             ResponsiveGatewayRegression();
             CatalogRoutesRegression();
+            ExecutionPlanRegression();
             CapabilityRegression();
             AccessRecoveryRegression();
             NativeGatewayRegression();
