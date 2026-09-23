@@ -173,6 +173,10 @@
 
             </StackPanel>
 
+            <StackPanel x:Name="CloudflareSection" Visibility="Collapsed">
+                <TextBlock Text="Account ID" Style="{StaticResource FieldLabel}" />
+                <TextBox x:Name="CloudflareAccountBox" Style="{StaticResource Input}" />
+            </StackPanel>
             <TextBlock x:Name="ApiKeyLabel" Text="{DynamicResource S.Settings.ApiKey}" Style="{StaticResource FieldLabel}" />
             <PasswordBox x:Name="ApiKeyBox" Style="{StaticResource Secret}" />
             <TextBlock x:Name="KeyStateText" Text="{DynamicResource S.Settings.ApiKeyStored}"
@@ -218,10 +222,13 @@
                       Checked="OnWorkingModelsFilterChanged" Unchecked="OnWorkingModelsFilterChanged" />
             <TextBlock x:Name="TestResultText" FontSize="11" Margin="0,6,0,0"
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
-            <ScrollViewer x:Name="ModelVerificationScroll" Visibility="Collapsed" MaxHeight="120"
+            <ScrollViewer x:Name="ModelVerificationScroll" Visibility="Collapsed" MaxHeight="220" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
-                <TextBlock x:Name="ModelVerificationText" FontSize="10.5" TextWrapping="Wrap"
-                           Foreground="{DynamicResource B.ForegroundDim}" />
+                <StackPanel>
+                    <TextBlock x:Name="ModelVerificationText" FontSize="10.5" TextWrapping="Wrap"
+                               Foreground="{DynamicResource B.ForegroundDim}" />
+                    <StackPanel x:Name="VerifiedModelsPanel" />
+                </StackPanel>
             </ScrollViewer>
 
             <!-- ============ Local AI ============ -->
@@ -243,6 +250,11 @@
 
             </StackPanel>
             <Expander x:Name="GeneralSettingsExpander" Header="General settings" Foreground="{DynamicResource B.Foreground}" Margin="0,12,0,0"><StackPanel>
+            <TextBlock Text="Execution" Style="{StaticResource Section}" />
+            <CheckBox x:Name="ConfirmWritesCheck" Content="Confirm every edit" Foreground="{DynamicResource B.Foreground}" />
+            <CheckBox x:Name="VisibleStepsCheck" Content="Show steps slowly" Foreground="{DynamicResource B.Foreground}" />
+            <TextBlock Text="Business defaults" Style="{StaticResource Section}" />
+            <TextBox x:Name="BusinessLocaleBox" Style="{StaticResource Input}" />
             <!-- ============ Privacy ============ -->
             <TextBlock Text="Privacy" Style="{StaticResource Section}" />
             <RadioButton x:Name="PrivacyLocalOnly" Style="{StaticResource Radio}"

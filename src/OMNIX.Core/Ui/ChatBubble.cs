@@ -169,6 +169,21 @@ namespace OMNIX.Core.Ui
             ScrollToEndSafe();
         }
 
+        /// <summary>Incremental plain-text preview; Markdown is rendered once on completion.</summary>
+        public void AppendStreamingText(string chunk)
+        {
+            if (string.IsNullOrEmpty(chunk)) return;
+            _rawText += chunk;
+            if (!IsLoaded) return;
+            var paragraph = _doc.Blocks.LastBlock as Paragraph;
+            if (paragraph == null) { paragraph = new Paragraph(); _doc.Blocks.Add(paragraph); }
+            paragraph.Inlines.Add(new Run(chunk));
+            if (_rawText.Length == chunk.Length)
+                _doc.FlowDirection = System.Text.RegularExpressions.Regex.IsMatch(chunk, @"[\u0600-\u06ff]")
+                    ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+            ScrollToEndSafe();
+        }
+
         public void ReplaceText(string fullText)
         {
             _rawText = fullText ?? "";

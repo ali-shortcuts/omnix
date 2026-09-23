@@ -13,7 +13,7 @@ namespace OMNIX.Core.AiGateway.Adapters
         public ProviderInfo Info { get; private set; }
         public CompatiblePresetAdapter(string id, string name, string url, string docs, string keys)
         {
-            _client = new OpenAiCompatibleClient(url, name);
+            _client = new OpenAiCompatibleClient(url, name, catalogPath: id == "siliconflow" ? "models?sub_type=chat" : null);
             Info = new ProviderInfo { Id=id, DisplayName=name, Kind=ProviderKind.Cloud,
                 Vision=VisionSupport.DependsOnModel, RequiresApiKey=true, DefaultModel="",
                 AccessProfile=ProviderAccessProfile.AccountDependent, DocumentationUrl=docs, ApiKeyUrl=keys };

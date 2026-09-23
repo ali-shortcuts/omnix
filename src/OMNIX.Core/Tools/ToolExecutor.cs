@@ -284,6 +284,10 @@ namespace OMNIX.Core.Tools
                 ? preview.ArgumentsJson
                 : call.ArgumentsJson;
             Reveal(adapter, new ToolCall { Name = call.Name, ArgumentsJson = applyArguments }, OfficeExecutionStage.Apply);
+            // Yield to Office/WPF so the real selection/reveal can paint and Stop can run.
+            int delay = Math.Max(1, Math.Min(2000, Settings.SettingsManager.Instance.Settings.ExecutionStepDelayMs));
+            if (adapter is IVisibleOfficeExecutionHost) await Task.Delay(delay, ct).ConfigureAwait(true);
+            EnsureRequestScope(ct);
             long applyTimer = RuntimeDiagnosticJournal.StartTimer();
             RuntimeDiagnosticJournal.Event("write_apply_start", call.Name, "start", null, null, null);
             try

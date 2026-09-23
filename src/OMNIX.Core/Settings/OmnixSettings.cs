@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace OMNIX.Core.Settings
 {
-    /// <summary>Layer 7.5 privacy modes. Default on first install: AskBeforeSending (most conservative).</summary>
+    /// <summary>Layer 7.5 privacy modes. Default on first install: CloudAllowed; existing explicit choices are preserved.</summary>
     public enum PrivacyMode
     {
         LocalOnly = 0,
@@ -42,6 +42,11 @@ namespace OMNIX.Core.Settings
         public string SelectedProviderId { get; set; }
         public string PreferredLocalProviderId { get; set; }
         public Dictionary<string, string> Models { get; set; }
+        public Dictionary<string, List<string>> SavedModels { get; set; }
+        public int ExecutionStepDelayMs { get; set; }
+        public string BusinessLocale { get; set; }
+        public string CloudflareAccountId { get; set; }
+        public bool ConfirmEveryWrite { get; set; }
         public CustomProviderConfig CustomProvider { get; set; }
         public CustomProviderConfig AgentRouter { get; set; }
         public CustomProviderConfig EndpointConfig(string id)
@@ -61,7 +66,10 @@ namespace OMNIX.Core.Settings
         {
             var s = new OmnixSettings();
             s.SchemaVersion = 4;
-            s.Privacy = PrivacyMode.AskBeforeSending;
+            s.Privacy = PrivacyMode.CloudAllowed;
+            s.SavedModels = new Dictionary<string, List<string>>();
+            s.ExecutionStepDelayMs = 350;
+            s.BusinessLocale = "Afghanistan; Dari; currency AFN";
             s.Theme = ThemeMode.System;
             s.UiLanguage = "en";
             s.SelectedProviderId = "gemini";

@@ -80,6 +80,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AiGateway\Adapters\CloudflareAdapter.cs" />
     <Compile Include="AiGateway\Adapters\CerebrasAdapter.cs" />
     <Compile Include="AiGateway\Adapters\CustomOpenAiCompatibleAdapter.cs" />
     <Compile Include="AiGateway\Adapters\GeminiAdapter.cs" />

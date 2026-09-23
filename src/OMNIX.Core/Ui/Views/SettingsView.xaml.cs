@@ -32,6 +32,8 @@ namespace OMNIX.Core.Ui
 
         private static readonly string[] AllowedOfficialHosts =
         {
+            "docs.siliconflow.com", "cloud.siliconflow.com",
+            "developers.cloudflare.com", "dash.cloudflare.com",
             "ai.google.dev",
             "aistudio.google.com",
             "groq.com",
@@ -56,6 +58,21 @@ namespace OMNIX.Core.Ui
         {
             InitializeComponent();
             Unloaded += (sender, args) => CancelProviderOperation();
+            ApiKeyBox.PasswordChanged += (sender, args) => InvalidateVerification();
+            CustomBaseUrlBox.TextChanged += (sender, args) => InvalidateVerification();
+            CloudflareAccountBox.TextChanged += (sender, args) => InvalidateVerification();
+            CustomApiTypeCombo.SelectionChanged += (sender, args) => InvalidateVerification();
+        }
+
+        private void InvalidateVerification()
+        {
+            if (_loading) return;
+            _modelVerification.Clear();
+            VerifiedModelsPanel.Children.Clear();
+            ModelVerificationText.Text = "";
+            ModelVerificationScroll.Visibility = Visibility.Collapsed;
+            WorkingModelsOnlyCheck.IsChecked = false;
+            WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
         }
 
         public void Initialize(WorkspaceController controller)
@@ -86,6 +103,11 @@ namespace OMNIX.Core.Ui
                 WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
                 ModelVerificationScroll.Visibility = Visibility.Collapsed;
                 ModelVerificationText.Text = "";
+                VerifiedModelsPanel.Children.Clear();
+                CloudflareAccountBox.Text = settings.CloudflareAccountId ?? "";
+                ConfirmWritesCheck.IsChecked = settings.ConfirmEveryWrite;
+                VisibleStepsCheck.IsChecked = settings.ExecutionStepDelayMs > 0;
+                BusinessLocaleBox.Text = settings.BusinessLocale ?? "Afghanistan; Dari; currency AFN";
                 ModelCombo.ItemsSource = new[] { "Custom Model" };
                 ManualModelBox.Visibility = Visibility.Collapsed;
                 if (selected != null)
@@ -116,6 +138,7 @@ namespace OMNIX.Core.Ui
                 MaxMessagesBox.Text = settings.HistoryMaxMessages.ToString();
                 MaxDaysBox.Text = settings.HistoryMaxAgeDays.ToString();
 
+                RefreshModelOptions(ModelCombo.Text);
                 UpdateLocalStatusText();
             }
             finally
@@ -142,6 +165,7 @@ namespace OMNIX.Core.Ui
         {
             if (info == null) return;
 
+            CloudflareSection.Visibility = info.Id == "cloudflare" ? Visibility.Visible : Visibility.Collapsed;
             CustomProviderSection.Visibility = (info.Id == "custom" || info.Id == "agentrouter") ? Visibility.Visible : Visibility.Collapsed;
             LocalProviderSection.Visibility = info.Id == "ollama" || info.Id == "lmstudio" ? Visibility.Visible : Visibility.Collapsed;
             bool needsKey = info.RequiresApiKey;
@@ -213,6 +237,7 @@ namespace OMNIX.Core.Ui
             WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
             ModelVerificationScroll.Visibility = Visibility.Collapsed;
             ModelVerificationText.Text = "";
+            VerifiedModelsPanel.Children.Clear();
             SaveDisplayedProviderFields();
             var settings = SettingsManager.Instance.Settings;
             _displayedProviderId = info.Id;
@@ -228,6 +253,7 @@ namespace OMNIX.Core.Ui
                 ManualModelBox.Visibility = Visibility.Collapsed;
             ModelCombo.Text = settings.Models != null && settings.Models.TryGetValue(info.Id, out model) ? model : info.DefaultModel;
 
+            RefreshModelOptions(ModelCombo.Text);
             ApiKeyBox.Clear();
             UpdateProviderUi(info);
             TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
@@ -242,6 +268,7 @@ namespace OMNIX.Core.Ui
             VerifyModelsButton.IsEnabled = !busy;
             WorkingModelsOnlyCheck.IsEnabled = !busy;
             CancelTestButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            CloudflareAccountBox.IsEnabled = !busy;
             ModelCombo.IsEnabled = !busy;
             ManualModelBox.IsEnabled = !busy;
             ApiKeyBox.IsEnabled = !busy;
@@ -359,6 +386,7 @@ namespace OMNIX.Core.Ui
                 WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
                 ModelVerificationScroll.Visibility = Visibility.Collapsed;
                 ModelVerificationText.Text = "";
+                VerifiedModelsPanel.Children.Clear();
                 RefreshModelOptions(current);
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
@@ -523,8 +551,9 @@ namespace OMNIX.Core.Ui
             WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
             ModelVerificationScroll.Visibility = Visibility.Visible;
             ModelVerificationText.Text = "";
+            VerifiedModelsPanel.Children.Clear();
             TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
-            TestResultText.Text = "Verifying detected models one at a time. Stop is available; each model has a bounded timeout.";
+            TestResultText.Text = "Testing models…";
 
             try
             {
@@ -561,7 +590,7 @@ namespace OMNIX.Core.Ui
             {
                 if (ReferenceEquals(_providerOperation, operation))
                 {
-                    TestResultText.Text = "Model verification stopped. Completed results were kept for this Settings view.";
+                    TestResultText.Text = "Stopped. Results kept.";
                     TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
                     WorkingModelsOnlyCheck.Visibility = _modelVerification.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                     RenderVerificationSummary(_modelVerification.Count, Math.Min(100, _discoveredModels.Count));
@@ -581,7 +610,11 @@ namespace OMNIX.Core.Ui
 
         private void RefreshModelOptions(string current)
         {
+            var settings = SettingsManager.Instance.Settings;
+            List<string> saved;
             IEnumerable<string> source = _discoveredModels;
+            if (settings.SavedModels != null && settings.SavedModels.TryGetValue(_displayedProviderId ?? "", out saved))
+                source = source.Concat(saved);
             if (WorkingModelsOnlyCheck.IsChecked == true)
                 source = source.Where(id =>
                 {
@@ -610,30 +643,53 @@ namespace OMNIX.Core.Ui
 
             int working = ordered.Count(x => x.Working);
             int textOnly = ordered.Count(x => x.State == ModelVerificationState.TextOnly);
-            int denied = ordered.Count(x => x.State == ModelVerificationState.AccessDenied);
-            int unavailable = ordered.Count(x => x.State == ModelVerificationState.NotFoundOrUnavailable);
-            int limited = ordered.Count(x => x.State == ModelVerificationState.RateLimited);
-            int incompatible = ordered.Count(x => x.State == ModelVerificationState.Incompatible);
-            int timedOut = ordered.Count(x => x.State == ModelVerificationState.TimedOut);
-
-            var lines = new List<string>
+            ModelVerificationText.Text = completed + "/" + total + " · tools " + working + " · text " + textOnly;
+            VerifiedModelsPanel.Children.Clear();
+            foreach (var result in ordered)
             {
-                "Progress " + completed + "/" + total + " · tool-compatible=" + working +
-                " · text-only=" + textOnly + " · denied=" + denied + " · unavailable=" + unavailable +
-                " · rate-limited=" + limited + " · incompatible=" + incompatible +
-                " · timeout=" + timedOut
-            };
-            foreach (var result in ordered.Take(20))
-            {
-                string mark = result.Working ? "✓" : result.State == ModelVerificationState.TextOnly ? "~" : "×";
-                lines.Add(mark + " " + result.ModelId + " — " + result.State +
-                          (result.ToolCallingVerified ? " · tools=" + (result.ToolTransport ?? "verified") : "") +
-                          (result.LatencyMs > 0 ? " · " + result.LatencyMs + " ms" : ""));
+                var captured = result;
+                bool selectable = result.Working || result.State == ModelVerificationState.TextOnly;
+                var row = new StackPanel { Orientation = Orientation.Horizontal };
+                var keep = new CheckBox { VerticalAlignment = VerticalAlignment.Center, IsEnabled = selectable,
+                    ToolTip = "Keep this model", Margin = new Thickness(0, 0, 6, 0) };
+                var settings = SettingsManager.Instance.Settings;
+                List<string> saved;
+                keep.IsChecked = settings.SavedModels != null &&
+                    settings.SavedModels.TryGetValue(_displayedProviderId ?? "", out saved) && saved.Contains(result.ModelId);
+                keep.Checked += (sender, args) => RememberModel(captured.ModelId, true);
+                keep.Unchecked += (sender, args) => RememberModel(captured.ModelId, false);
+                var select = new Button { Content = result.ModelId, IsEnabled = selectable,
+                    ToolTip = result.State + (result.ToolCallingVerified ? " · tools" : " · no verified tools"),
+                    Margin = new Thickness(0, 2, 0, 2) };
+                select.SetResourceReference(Control.ForegroundProperty, "B.Foreground");
+                select.SetResourceReference(Control.BackgroundProperty, "B.Surface");
+                select.Click += (sender, args) =>
+                {
+                    RememberModel(captured.ModelId, true);
+                    ModelCombo.Text = captured.ModelId;
+                    ManualModelBox.Visibility = Visibility.Collapsed;
+                    TestResultText.Text = "Selected: " + captured.ModelId;
+                };
+                row.Children.Add(keep);
+                row.Children.Add(select);
+                var state = new TextBlock { Text = "  " + result.State, VerticalAlignment = VerticalAlignment.Center };
+                state.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+                row.Children.Add(state);
+                VerifiedModelsPanel.Children.Add(row);
             }
-            if (ordered.Count > 20) lines.Add("… " + (ordered.Count - 20) + " more tested models");
-
-            ModelVerificationText.Text = string.Join(Environment.NewLine, lines);
             ModelVerificationScroll.Visibility = ordered.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void RememberModel(string model, bool keep)
+        {
+            var settings = SettingsManager.Instance.Settings;
+            if (settings.SavedModels == null) settings.SavedModels = new Dictionary<string, List<string>>();
+            List<string> models;
+            if (!settings.SavedModels.TryGetValue(_displayedProviderId, out models))
+                settings.SavedModels[_displayedProviderId] = models = new List<string>();
+            if (keep && !models.Contains(model)) models.Add(model);
+            if (!keep) models.Remove(model);
+            RefreshModelOptions(EffectiveModelId);
         }
 
         private async void OnProbeLocal(object sender, RoutedEventArgs e)
@@ -720,6 +776,7 @@ namespace OMNIX.Core.Ui
                 customConfig.Model = EffectiveModelId;
             }
 
+            if (_displayedProviderId == "cloudflare") settings.CloudflareAccountId = CloudflareAccountBox.Text.Trim();
             settings.Models[_displayedProviderId] = EffectiveModelId;
             string key = ApiKeyBox.Password;
             if (!string.IsNullOrWhiteSpace(key))
@@ -735,6 +792,9 @@ namespace OMNIX.Core.Ui
             else if (PrivacyCloudAllowed.IsChecked == true) settings.Privacy = PrivacyMode.CloudAllowed;
             else settings.Privacy = PrivacyMode.AskBeforeSending;
 
+            settings.ConfirmEveryWrite = ConfirmWritesCheck.IsChecked == true;
+            settings.ExecutionStepDelayMs = VisibleStepsCheck.IsChecked == true ? 350 : 0;
+            settings.BusinessLocale = BusinessLocaleBox.Text.Trim();
             settings.PreferLocalWhenAvailable = PreferLocalCheck.IsChecked == true;
 
             int msgs, days;
