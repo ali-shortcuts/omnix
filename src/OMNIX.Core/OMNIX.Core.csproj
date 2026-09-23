@@ -90,6 +90,9 @@
     <Compile Include="AiGateway\Adapters\MistralAdapter.cs" />
     <Compile Include="AiGateway\Adapters\OllamaAdapter.cs" />
     <Compile Include="AiGateway\Adapters\OpenRouterAdapter.cs" />
+    <Compile Include="Agent\ExecutionPlan.cs" />
+    <Compile Include="Agent\OfficePlaybooks.cs" />
+    <Compile Include="Agent\OfficePostconditions.cs" />
     <Compile Include="AiGateway\AiGateway.cs" />
     <Compile Include="AiGateway\Http\OpenAiCompatibleClient.cs" />
     <Compile Include="AiGateway\Http\SseLineReader.cs" />
@@ -137,6 +140,14 @@
     <Compile Include="Reference\OfficeReference.cs" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Agent\Playbooks\Excel.md"><LogicalName>OMNIX.Agent.Excel.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\PowerPoint.md"><LogicalName>OMNIX.Agent.PowerPoint.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\Word.md"><LogicalName>OMNIX.Agent.Word.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\business.md"><LogicalName>OMNIX.Agent.business.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\contract.md"><LogicalName>OMNIX.Agent.contract.md</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\gold.json"><LogicalName>OMNIX.Agent.gold.json</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\inventory.json"><LogicalName>OMNIX.Agent.inventory.json</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Agent\Playbooks\invoice.json"><LogicalName>OMNIX.Agent.invoice.json</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Reference\ExcelFunctions.json"><LogicalName>OMNIX.ExcelFunctions.json</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Localization\Strings.xaml"><LogicalName>OMNIX.Core.Localization.Strings.source.xaml</LogicalName></EmbeddedResource>
     <Page Include="Localization\Strings.xaml"><SubType>Designer</SubType><Generator>MSBuild:Compile</Generator></Page>

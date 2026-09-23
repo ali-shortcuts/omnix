@@ -1,0 +1,58 @@
+{
+  "steps": [
+    {
+      "id": "create",
+      "tool": "create_data_table",
+      "args": {
+        "sheet": "",
+        "uniqueName": false,
+        "title": "نام دکان — نمونه",
+        "startRow": 4,
+        "headers": [
+          "کد کالا",
+          "نام کالا",
+          "تعداد",
+          "قیمت واحد (افغانی)",
+          "ارزش (افغانی)"
+        ],
+        "rows": [
+          [
+            "P001",
+            "کالای نمونه",
+            10,
+            20,
+            {
+              "formula": "=C5*D5",
+              "numberFormat": "#,##0.00"
+            }
+          ]
+        ]
+      },
+      "checks": [
+        {
+          "kind": "heading",
+          "sheet": "",
+          "address": "A1:E2",
+          "text": "نام دکان — نمونه"
+        },
+        {
+          "kind": "table",
+          "sheet": "",
+          "address": "A4:E5"
+        },
+        {
+          "kind": "formula",
+          "sheet": "",
+          "address": "E5",
+          "formula": "=C5*D5",
+          "value": 200
+        },
+        {
+          "kind": "no_errors",
+          "sheet": "",
+          "address": "A4:E5"
+        }
+      ]
+    }
+  ]
+}

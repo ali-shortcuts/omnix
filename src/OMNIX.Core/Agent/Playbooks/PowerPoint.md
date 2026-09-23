@@ -1,0 +1,2 @@
+POWERPOINT WORK GUIDE
+Inspect slide map, existing layout and target shapes first. Reuse theme/master and revise existing slides on follow-ups. Plan concise titles, clear hierarchy, suitable text size and shapes within slide bounds. Avoid clipped text and arbitrary dense tables. Include slide count, actual title text and shape-bounds checks. Verify speaker notes with a native read when requested. Use rendered slide inspection when vision is supported; never claim you saw pixels from structured text alone.

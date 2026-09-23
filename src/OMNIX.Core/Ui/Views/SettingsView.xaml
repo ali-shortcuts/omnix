@@ -222,6 +222,7 @@
                       Checked="OnWorkingModelsFilterChanged" Unchecked="OnWorkingModelsFilterChanged" />
             <TextBlock x:Name="TestResultText" FontSize="11" Margin="0,6,0,0"
                        Foreground="{DynamicResource B.ForegroundDim}" TextWrapping="Wrap" />
+            <TextBox x:Name="VerifiedModelSearch" Style="{StaticResource Input}" ToolTip="Search verified models" TextChanged="OnVerifiedModelSearch" Margin="0,4,0,0" />
             <ScrollViewer x:Name="ModelVerificationScroll" Visibility="Collapsed" MaxHeight="220" HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
                 <StackPanel>
@@ -253,6 +254,9 @@
             <TextBlock Text="Execution" Style="{StaticResource Section}" />
             <CheckBox x:Name="ConfirmWritesCheck" Content="Confirm every edit" Foreground="{DynamicResource B.Foreground}" />
             <CheckBox x:Name="VisibleStepsCheck" Content="Show steps slowly" Foreground="{DynamicResource B.Foreground}" />
+            <TextBlock Text="Step delay (ms)" Style="{StaticResource FieldLabel}" />
+            <Slider x:Name="StepDelaySlider" Minimum="100" Maximum="2000" TickFrequency="100" IsSnapToTickEnabled="True" ToolTip="Delay between visible Office operations" />
+            <TextBlock Text="{Binding ElementName=StepDelaySlider, Path=Value, StringFormat={}{0:0} ms}" Foreground="{DynamicResource B.Foreground}" />
             <TextBlock Text="Business defaults" Style="{StaticResource Section}" />
             <TextBox x:Name="BusinessLocaleBox" Style="{StaticResource Input}" />
             <!-- ============ Privacy ============ -->

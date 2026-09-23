@@ -99,6 +99,8 @@ namespace OMNIX.Core.AiGateway
             int mutationRepairTurns = 0;
             int protocolRepairTurns = 0;
             bool mutationRequested = MutationIntentDetector.IsLikelyMutation(request.UserTurn != null ? request.UserTurn.Text : null);
+            if (toolExecutor != null)
+                toolExecutor.Execution.Begin(request.UserTurn != null ? request.UserTurn.Text : "", hostAdapter is Agent.IPlanVerificationHost);
             RuntimeDiagnosticJournal.BeginRequest(
                 hostAdapter != null ? hostAdapter.HostDisplayName : "none",
                 mutationRequested,
@@ -168,6 +170,8 @@ namespace OMNIX.Core.AiGateway
                 if (!string.IsNullOrEmpty(runtimePreflight))
                     liveSystemPrompt += "\n\n" + runtimePreflight;
 
+                if (toolExecutor != null && toolExecutor.Execution.Required)
+                    liveSystemPrompt += "\n" + Agent.OfficePlaybooks.Load(hostAdapter.Host, request.UserTurn == null ? "" : request.UserTurn.Text) + "\n" + toolExecutor.Execution.Envelope();
                 var req = new ChatRequest
                 {
                     SystemPrompt = liveSystemPrompt,
@@ -451,7 +455,13 @@ namespace OMNIX.Core.AiGateway
                             (string.IsNullOrWhiteSpace(lastWriteFailure) ? "No verified change was applied." : "Last write result: " + lastWriteFailure));
                     }
 
-                    if (mutationRequested && writeSucceeded && !lastWriteVerified)
+                    if (writeSucceeded && toolExecutor.Execution.Required)
+                    {
+                        await toolExecutor.ExecuteAsync(new ToolCall { Name = ToolNames.VerifyExecutionPlan, ArgumentsJson = "{}" }, hostAdapter, ct).ConfigureAwait(true);
+                        lastWriteVerified = toolExecutor.Execution.Complete;
+                    }
+
+                    if (writeSucceeded && !lastWriteVerified)
                     {
                         Logger.Gateway("Verification enforcement: final text before read-back; repairTurn=" + verificationRepairTurns);
                         RuntimeDiagnosticJournal.Event("verification_repair", null, "final_before_readback", null, null,
@@ -469,7 +479,7 @@ namespace OMNIX.Core.AiGateway
                             {
                                 Role = ChatRole.User,
                                 TimestampUtc = DateTime.UtcNow,
-                                Text = "OMNIX RUNTIME VERIFICATION REQUIRED: the latest Office write succeeded, but the affected Office state has not been read back after that write. " +
+                                Text = toolExecutor.Execution.Required ? "Execution plan is incomplete. Use verify_execution_plan to inspect status, repair pending steps without weakening their checks. Execute remaining steps, then verify all conditions. Report incomplete if repair attempts are exhausted." : "OMNIX RUNTIME VERIFICATION REQUIRED: the latest Office write succeeded, but the affected Office state has not been read back after that write. " +
                                        "Use exactly one appropriate read tool now (for example read_document_section/read_selection/read_document_map/read_document/read_presentation) to verify the actual result. " +
                                        "Do not claim completion until the read result confirms the latest change."
                             };
@@ -549,7 +559,7 @@ namespace OMNIX.Core.AiGateway
                         writeSucceeded = true;
                         successfulWrites++;
                         lastWriteFailure = null;
-                        lastWriteVerified = false;
+                        lastWriteVerified = toolExecutor.Execution.Required ? toolExecutor.Execution.Complete : false;
                     }
                     else
                     {
@@ -557,11 +567,11 @@ namespace OMNIX.Core.AiGateway
                         lastWriteFailure = SafeRuntimeSummary(result != null ? result.ContentForModel : "No tool result.", 900);
                     }
                 }
-                else if (result != null && result.Success && writeSucceeded && IsVerificationTool(call.Name))
+                else if (result != null && result.Success && writeSucceeded && (toolExecutor.Execution.Required ? call.Name == ToolNames.VerifyExecutionPlan : IsVerificationTool(call.Name)))
                 {
-                    lastWriteVerified = true;
+                    lastWriteVerified = toolExecutor.Execution.Required ? toolExecutor.Execution.Complete : true;
                     Logger.Gateway("Read-back verification completed after latest write; tool=" + SafeToolName(call.Name));
-                    RuntimeDiagnosticJournal.Event("write_verification", call.Name, "verified", null, null, null);
+                    RuntimeDiagnosticJournal.Event("write_verification", call.Name, lastWriteVerified ? "verified" : "incomplete", null, null, null);
                 }
 
                 Logger.Gateway("Tool completed: tool=" + SafeToolName(call.Name) +

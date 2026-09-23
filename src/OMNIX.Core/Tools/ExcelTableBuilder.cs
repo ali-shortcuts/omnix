@@ -244,7 +244,7 @@ namespace OMNIX.Core.Tools
                 string title = (string)plan["title"];
                 if (!string.IsNullOrWhiteSpace(title))
                 {
-                    var heading = created.Range["A1"].Resize[1, headers.Count];
+                    var heading = created.Range["A1"].Resize[Math.Min(2, HeaderRow(plan) - 1), headers.Count];
                     heading.Merge();
                     heading.NumberFormat = "@";
                     heading.Value2 = title;

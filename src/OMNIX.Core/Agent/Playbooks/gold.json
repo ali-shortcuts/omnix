@@ -1,0 +1,60 @@
+{
+  "steps": [
+    {
+      "id": "create",
+      "tool": "create_data_table",
+      "args": {
+        "sheet": "",
+        "uniqueName": false,
+        "title": "نام دکان — نمونه",
+        "startRow": 4,
+        "headers": [
+          "کد کالا",
+          "نام کالا",
+          "وزن (گرم)",
+          "عیار",
+          "نرخ (افغانی/گرم)",
+          "ارزش (افغانی)"
+        ],
+        "rows": [
+          [
+            "G001",
+            "نمونه گردنبند",
+            5.2,
+            21,
+            2500,
+            {
+              "formula": "=C5*E5",
+              "numberFormat": "#,##0.00"
+            }
+          ]
+        ]
+      },
+      "checks": [
+        {
+          "kind": "heading",
+          "sheet": "",
+          "address": "A1:F2",
+          "text": "نام دکان — نمونه"
+        },
+        {
+          "kind": "table",
+          "sheet": "",
+          "address": "A4:F5"
+        },
+        {
+          "kind": "formula",
+          "sheet": "",
+          "address": "F5",
+          "formula": "=C5*E5",
+          "value": 13000
+        },
+        {
+          "kind": "no_errors",
+          "sheet": "",
+          "address": "A4:F5"
+        }
+      ]
+    }
+  ]
+}

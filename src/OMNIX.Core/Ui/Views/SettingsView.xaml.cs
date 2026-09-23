@@ -107,6 +107,7 @@ namespace OMNIX.Core.Ui
                 CloudflareAccountBox.Text = settings.CloudflareAccountId ?? "";
                 ConfirmWritesCheck.IsChecked = settings.ConfirmEveryWrite;
                 VisibleStepsCheck.IsChecked = settings.ExecutionStepDelayMs > 0;
+                StepDelaySlider.Value = settings.ExecutionStepDelayMs > 0 ? settings.ExecutionStepDelayMs : 350;
                 BusinessLocaleBox.Text = settings.BusinessLocale ?? "Afghanistan; Dari; currency AFN";
                 ModelCombo.ItemsSource = new[] { "Custom Model" };
                 ManualModelBox.Visibility = Visibility.Collapsed;
@@ -390,7 +391,7 @@ namespace OMNIX.Core.Ui
                 RefreshModelOptions(current);
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Success");
 
-                TestResultText.Text = models.Count + " models detected. Detection is only a catalog result; use Test model or Verify models to prove inference.";
+                TestResultText.Text = models.Count + " models found. Verify before use.";
             }
             catch (OmnixException ex)
             {
@@ -540,14 +541,19 @@ namespace OMNIX.Core.Ui
 
             if (_discoveredModels.Count == 0)
             {
-                TestResultText.Text = "Detect models first. Verification tests only the catalog returned for this exact provider/API configuration.";
+                TestResultText.Text = "Detect models first.";
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
                 return;
             }
 
+            var candidates = _discoveredModels.Where(id => !_modelVerification.ContainsKey(id)).Take(100).ToList();
+            if (candidates.Count == 0)
+            {
+                TestResultText.Text = "All detected models tested. Select a model or test it again individually.";
+                return;
+            }
             SaveProviderFields();
             var operation = BeginProviderOperation(300);
-            _modelVerification.Clear();
             WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
             ModelVerificationScroll.Visibility = Visibility.Visible;
             ModelVerificationText.Text = "";
@@ -561,7 +567,7 @@ namespace OMNIX.Core.Ui
                 var results = await ProviderDiagnostics.VerifyModelsAsync(
                     info.Id,
                     credentials,
-                    _discoveredModels,
+                    candidates,
                     (result, completed, total) =>
                     {
                         Dispatcher.BeginInvoke(new Action(() =>
@@ -575,7 +581,7 @@ namespace OMNIX.Core.Ui
 
                 if (!ReferenceEquals(_providerOperation, operation)) return;
                 foreach (var result in results) _modelVerification[result.ModelId] = result;
-                RenderVerificationSummary(results.Count, Math.Min(100, _discoveredModels.Count));
+                RenderVerificationSummary(_modelVerification.Count, _discoveredModels.Count);
                 WorkingModelsOnlyCheck.Visibility = Visibility.Visible;
 
                 int working = results.Count(x => x.Working);
@@ -633,19 +639,24 @@ namespace OMNIX.Core.Ui
             ModelCombo.Text = current ?? "";
         }
 
+        private void OnVerifiedModelSearch(object sender, TextChangedEventArgs e)
+        {
+            if (VerifiedModelsPanel == null || _modelVerification == null) return;
+            RenderVerificationSummary(_modelVerification.Count, _modelVerification.Count);
+        }
+
         private void RenderVerificationSummary(int completed, int total)
         {
             var ordered = _modelVerification.Values
                 .OrderByDescending(x => x.Working)
                 .ThenBy(x => x.ModelId, StringComparer.OrdinalIgnoreCase)
-                .Take(100)
                 .ToList();
 
             int working = ordered.Count(x => x.Working);
             int textOnly = ordered.Count(x => x.State == ModelVerificationState.TextOnly);
             ModelVerificationText.Text = completed + "/" + total + " · tools " + working + " · text " + textOnly;
             VerifiedModelsPanel.Children.Clear();
-            foreach (var result in ordered)
+            foreach (var result in ordered.Where(x => string.IsNullOrWhiteSpace(VerifiedModelSearch.Text) || x.ModelId.IndexOf(VerifiedModelSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0).Take(100))
             {
                 var captured = result;
                 bool selectable = result.Working || result.State == ModelVerificationState.TextOnly;
@@ -793,7 +804,7 @@ namespace OMNIX.Core.Ui
             else settings.Privacy = PrivacyMode.AskBeforeSending;
 
             settings.ConfirmEveryWrite = ConfirmWritesCheck.IsChecked == true;
-            settings.ExecutionStepDelayMs = VisibleStepsCheck.IsChecked == true ? 350 : 0;
+            settings.ExecutionStepDelayMs = VisibleStepsCheck.IsChecked == true ? (int)StepDelaySlider.Value : 0;
             settings.BusinessLocale = BusinessLocaleBox.Text.Trim();
             settings.PreferLocalWhenAvailable = PreferLocalCheck.IsChecked == true;
 
