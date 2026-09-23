@@ -74,7 +74,7 @@ namespace OMNIX.Core.Agent
         {
             if (c == null) throw new ArgumentException("Postcondition must be an object.");
             string kind = (string)c["kind"];
-            string[] allowed = host == HostType.Excel ? new[]{"cell_value","formula","heading","table","no_errors"} :
+            string[] allowed = host == HostType.Excel ? new[]{"cell_value","formula","heading","table","no_errors","format"} :
                 host == HostType.Word ? new[]{"text","paragraph_style","table_count"} : new[]{"text","slide_count","shape_bounds"};
             if (!allowed.Contains(kind)) throw new ArgumentException("Unsupported postcondition for " + host + ": " + kind);
             if (host == HostType.Excel && (string.IsNullOrWhiteSpace((string)c["sheet"]) || string.IsNullOrWhiteSpace((string)c["address"])))
@@ -83,6 +83,8 @@ namespace OMNIX.Core.Agent
                 throw new ArgumentException("Cell/formula checks require the expected computed value.");
             if ((kind == "heading" || kind == "text") && string.IsNullOrWhiteSpace((string)c["text"]))
                 throw new ArgumentException("Text checks require expected nonempty text.");
+            if (kind == "format" && !new[]{"bold","italic","wrapText","fontSize","numberFormat","horizontalAlignment"}.Any(k => c[k] != null))
+                throw new ArgumentException("Format checks require at least one explicit formatting property.");
             if (kind == "paragraph_style" && string.IsNullOrWhiteSpace((string)c["style"]))
                 throw new ArgumentException("Style check requires the expected style name.");
             if (kind == "formula" && string.IsNullOrWhiteSpace((string)c["formula"]))
@@ -128,13 +130,16 @@ namespace OMNIX.Core.Agent
         public string VerifyAll(IPlanVerificationHost host)
         {
             if (_plan == null) return "No execution plan exists.";
+            var details = new List<string>();
             foreach (var step in Steps)
             {
                 string id = (string)step["id"];
                 if (!_applied.Contains(id)) continue;
-                if (Check(host,step).Count == 0) _passed.Add(id); else _passed.Remove(id);
+                var failures = Check(host,step);
+                if (failures.Count == 0) _passed.Add(id);
+                else { _passed.Remove(id); details.Add(id + ": " + string.Join("; ", failures)); }
             }
-            Checkpoint(); return Summary();
+            Checkpoint(); return Summary() + (details.Count == 0 ? "" : "\n" + string.Join("\n", details));
         }
         private static List<string> Check(IPlanVerificationHost host,JObject step)
         {

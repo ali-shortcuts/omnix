@@ -47,6 +47,21 @@ namespace OMNIX.Core.Agent
                 }
                 return ValuesEqual(range.Value2,c["value"])?null:"Computed value/type differs from the plan at "+(string)c["address"];
             }
+            if(kind=="format")
+            {
+                if(c["bold"]!=null && !ValuesEqual(range.Font.Bold,c["bold"])) return "Bold differs from the plan.";
+                if(c["italic"]!=null && !ValuesEqual(range.Font.Italic,c["italic"])) return "Italic differs from the plan.";
+                if(c["wrapText"]!=null && !ValuesEqual(range.WrapText,c["wrapText"])) return "Text wrapping differs from the plan.";
+                if(c["fontSize"]!=null && !ValuesEqual(range.Font.Size,c["fontSize"])) return "Font size differs from the plan.";
+                if(c["numberFormat"]!=null && !ValuesEqual(range.NumberFormat,c["numberFormat"])) return "Number format differs from the plan.";
+                if(c["horizontalAlignment"]!=null)
+                {
+                    string alignment=(string)c["horizontalAlignment"];
+                    int expected=alignment=="center"?(int)Excel.XlHAlign.xlHAlignCenter:alignment=="right"?(int)Excel.XlHAlign.xlHAlignRight:alignment=="left"?(int)Excel.XlHAlign.xlHAlignLeft:(int)Excel.XlHAlign.xlHAlignGeneral;
+                    if(!ValuesEqual(range.HorizontalAlignment,new JValue(expected))) return "Horizontal alignment differs from the plan.";
+                }
+                return null;
+            }
             if(kind=="heading")
             {
                 var first=(Excel.Range)range.Cells[1,1];

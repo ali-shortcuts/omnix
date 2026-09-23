@@ -126,7 +126,7 @@ class WorkspaceStartupRegression {
             view.UpdateLayout(); Snapshot(view,"settings-"+mode);
         }
     }
-    sealed class FakeHost : IHostAdapter, IIndexedHostAdapter, IOfficeAccessHost {
+    class FakeHost : IHostAdapter, IIndexedHostAdapter, IOfficeAccessHost {
         public bool AllowWrites; public int Writes;
         public int AccessReads;
         public string ReadOfficeAccess() { AccessReads++; return "documentPresent=true; writeToolsExposed=true; readOnly=false; workbookStructureProtected=false"; }
@@ -253,6 +253,50 @@ class WorkspaceStartupRegression {
         plan.SaveCheckpoint = text => { throw new IOException("disk unavailable"); };
         plan.VerifyAll(probe);
         Check(plan.Complete, "Checkpoint failure changed native verification result");
+    }
+
+    sealed class ContractHost : FakeHost, OMNIX.Core.Agent.IPlanVerificationHost {
+        public bool Accept;
+        public string CheckPostcondition(Newtonsoft.Json.Linq.JObject check) { return Accept && Writes > 0 ? null : "Native value mismatch"; }
+    }
+    sealed class ContractProvider : IProviderAdapter {
+        public int Calls;
+        public ProviderInfo Info { get; private set; }
+        public ContractProvider() { Info=new ProviderInfo { Id="custom",DisplayName="Contract fixture",Kind=ProviderKind.Cloud,Vision=VisionSupport.No }; }
+        public void Configure(ProviderCredentials credentials) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            Calls++;
+            string name=null, args=null;
+            if(Calls==1) {
+                name=ToolNames.SubmitExecutionPlan;
+                args="{\"steps\":[{\"id\":\"write\",\"tool\":\"write_to_cell\",\"args\":{\"address\":\"A1\",\"value\":1},\"checks\":[{\"kind\":\"cell_value\",\"sheet\":\"Sheet1\",\"address\":\"A1\",\"value\":1}]}]}";
+            } else if(Calls==2) { name=ToolNames.WriteToCell; args="{\"address\":\"A1\",\"value\":1}"; }
+            else if(Calls==3) { name=ToolNames.ReadDocumentMap; args="{}"; }
+            if(name!=null) return Task.FromResult(new ChatResponse { ToolCalls=new List<ProviderToolCall> { new ProviderToolCall { Id="contract-"+Calls,Name=name,ArgumentsJson=args } } });
+            return Task.FromResult(new ChatResponse { Text="Everything is complete." });
+        }
+    }
+    static void NativeContractGatewayRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        var oldProvider=settings.SelectedProviderId; var oldPrivacy=settings.Privacy; bool oldLocal=settings.PreferLocalWhenAvailable;
+        try {
+            settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed; settings.PreferLocalWhenAvailable=false;
+            foreach(bool accept in new[]{false,true}) {
+                var registry=new ProviderRegistry(); var provider=new ContractProvider();
+                var providers=(List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+                providers.Clear(); providers.Add(provider);
+                var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+                var host=new ContractHost { AllowWrites=true,Accept=accept };
+                var executor=new ToolExecutor { WriteConfirmation=preview=>Task.FromResult(true) };
+                var result=gateway.ChatAsync(new ChatRequest { UserTurn=new ChatTurn {Role=ChatRole.User,Text="Write one into A1"}},host,part=>{},executor,CancellationToken.None).GetAwaiter().GetResult();
+                Check(host.Writes==1,"Contract path repeated or skipped mutation");
+                Check(executor.Execution.Complete==accept,"Gateway ignored native acceptance state");
+                Check((result.Text=="Everything is complete.")==accept,"Unrelated document read falsely verified the execution plan");
+            }
+        } finally { settings.SelectedProviderId=oldProvider;settings.Privacy=oldPrivacy;settings.PreferLocalWhenAvailable=oldLocal; }
     }
 
     static void NativeGatewayRegression() {
@@ -621,6 +665,7 @@ class WorkspaceStartupRegression {
             ResponsiveGatewayRegression();
             CatalogRoutesRegression();
             ExecutionPlanRegression();
+            NativeContractGatewayRegression();
             CapabilityRegression();
             AccessRecoveryRegression();
             NativeGatewayRegression();
