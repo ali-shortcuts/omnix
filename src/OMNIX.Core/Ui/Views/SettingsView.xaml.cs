@@ -541,14 +541,19 @@ namespace OMNIX.Core.Ui
 
             if (_discoveredModels.Count == 0)
             {
-                TestResultText.Text = "Detect models first. Verification tests only the catalog returned for this exact provider/API configuration.";
+                TestResultText.Text = "Detect models first.";
                 TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.Danger");
                 return;
             }
 
+            var candidates = _discoveredModels.Where(id => !_modelVerification.ContainsKey(id)).Take(100).ToList();
+            if (candidates.Count == 0)
+            {
+                TestResultText.Text = "All detected models tested. Select a model or test it again individually.";
+                return;
+            }
             SaveProviderFields();
             var operation = BeginProviderOperation(300);
-            _modelVerification.Clear();
             WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
             ModelVerificationScroll.Visibility = Visibility.Visible;
             ModelVerificationText.Text = "";
@@ -562,7 +567,7 @@ namespace OMNIX.Core.Ui
                 var results = await ProviderDiagnostics.VerifyModelsAsync(
                     info.Id,
                     credentials,
-                    _discoveredModels,
+                    candidates,
                     (result, completed, total) =>
                     {
                         Dispatcher.BeginInvoke(new Action(() =>
@@ -576,7 +581,7 @@ namespace OMNIX.Core.Ui
 
                 if (!ReferenceEquals(_providerOperation, operation)) return;
                 foreach (var result in results) _modelVerification[result.ModelId] = result;
-                RenderVerificationSummary(results.Count, Math.Min(100, _discoveredModels.Count));
+                RenderVerificationSummary(_modelVerification.Count, _discoveredModels.Count);
                 WorkingModelsOnlyCheck.Visibility = Visibility.Visible;
 
                 int working = results.Count(x => x.Working);
@@ -645,14 +650,13 @@ namespace OMNIX.Core.Ui
             var ordered = _modelVerification.Values
                 .OrderByDescending(x => x.Working)
                 .ThenBy(x => x.ModelId, StringComparer.OrdinalIgnoreCase)
-                .Take(100)
                 .ToList();
 
             int working = ordered.Count(x => x.Working);
             int textOnly = ordered.Count(x => x.State == ModelVerificationState.TextOnly);
             ModelVerificationText.Text = completed + "/" + total + " · tools " + working + " · text " + textOnly;
             VerifiedModelsPanel.Children.Clear();
-            foreach (var result in ordered.Where(x => string.IsNullOrWhiteSpace(VerifiedModelSearch.Text) || x.ModelId.IndexOf(VerifiedModelSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0))
+            foreach (var result in ordered.Where(x => string.IsNullOrWhiteSpace(VerifiedModelSearch.Text) || x.ModelId.IndexOf(VerifiedModelSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0).Take(100))
             {
                 var captured = result;
                 bool selectable = result.Working || result.State == ModelVerificationState.TextOnly;

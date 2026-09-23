@@ -292,8 +292,8 @@ namespace OMNIX.Core.Ui
                 var checkpointKey = requestDocKey + "|execution-plan";
                 var checkpoints = _historyStore.Load(checkpointKey);
                 _toolExecutor.Execution.PreviousCheckpoint = checkpoints.Count == 0 ? null : checkpoints[checkpoints.Count - 1].Text;
-                _toolExecutor.Execution.SaveCheckpoint = text => _historyStore.Save(checkpointKey,
-                    new List<ChatTurn> { new ChatTurn { Role = ChatRole.Assistant, Text = text, TimestampUtc = DateTime.UtcNow } });
+                _toolExecutor.Execution.SaveCheckpoint = checkpointText => _historyStore.Save(checkpointKey,
+                    new List<ChatTurn> { new ChatTurn { Role = ChatRole.Assistant, Text = checkpointText, TimestampUtc = DateTime.UtcNow } });
                 var request = new ChatRequest
                 {
                     SystemPrompt = AiGateway.AiGateway.BuildSystemPrompt(_adapter, _adapter.ReadContext()),

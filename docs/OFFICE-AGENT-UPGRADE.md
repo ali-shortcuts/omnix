@@ -45,3 +45,18 @@ Optional visible pacing yields the UI before each real Office write and rechecks
 Windows CI covers compilation, WPF initialization/selection, privacy, encrypted history, provider diagnostics, request budgets, protocol fixtures and installer packaging. New tests exercise heading plan layout, selectable verified models, dispatcher heartbeat during deliberately blocking provider setup and the Cloudflare model discovery route.
 
 GitHub-hosted Windows does not include a usable installed Excel/Word/PowerPoint environment. Manual acceptance must confirm: a titled gold-shop workbook using AFN; numeric/formula read-back; edits reuse the correct sheet; Stop during streaming and before mutation; no Excel restart; small-pane RTL readability; Cloudflare/SiliconFlow credentials and quota behavior; supported Office x86/x64 versions. Passing CI is not evidence of zero defects or production Authenticode signing.
+
+
+## Native execution contracts (follow-up to preview 63)
+
+Native Excel, Word and PowerPoint adapters now require `submit_execution_plan` before writes. Each ordered step names its exact write tool/arguments and native postconditions. The executor rejects unplanned or mismatched writes. Applied steps cannot lose or weaken their original acceptance criteria, and a step has at most three execution attempts. Replaying an applied table creation is rejected; repair must target existing content.
+
+Excel conditions inspect typed values, exact formulas plus computed results, merged headings outside data tables, exact native table ranges and Excel errors. Word conditions inspect paragraph text/style and table counts; PowerPoint conditions inspect slide counts, shape text and bounds. Every later write rechecks previously applied steps, and final completion rechecks the entire plan through the document-scoped executor. A successful unrelated read no longer proves completion. These checks enforce the submitted criteria; they cannot prove that a model understood every ambiguous natural-language requirement.
+
+Execution checkpoints use the same encrypted per-document history store and are removed when chat history is cleared. Previous plans are context only and must be re-inspected, not automatically replayed. Failure to persist a checkpoint does not change an already-applied write into a retryable failure.
+
+Independent embedded guides cover each host and selectively load business-task guidance. Three typed Excel demonstration templates (gold, inventory, invoice) include concrete native acceptance criteria. New titled tables use a two-row title frame. These are small validated sample plans, not hundreds of visual assets or a certified business/accounting database. Word/PowerPoint have host guides and checks but do not yet have a comparable curated template library.
+
+Visible operation delay is adjustable from 100–2000 ms or disabled. Verified-model results support search and retained selection; subsequent verification continues with untested catalog entries in batches of at most 100. Only 100 result rows are rendered at once; search covers all tested IDs. Stop and the five-minute per-batch deadline remain available. This avoids restarting from the same first catalog entry on each verification attempt.
+
+New Windows regressions exercise missing plans, mismatched arguments, weakened conditions, later-write invalidation, numeric text versus numbers, checkpoint failures, embedded guide loading and typed-template validation. Native Office installation testing remains a separate required acceptance step; CI fakes cannot prove COM behavior or layout on the user's machine.
