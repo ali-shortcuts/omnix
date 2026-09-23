@@ -87,6 +87,8 @@ namespace OMNIX.Core.Tools
             {
                 if (value.ToString().Length > MaxCellTextChars)
                     throw new ArgumentException("Cell text exceeds " + MaxCellTextChars + " characters.");
+                if (value.ToString().TrimStart().StartsWith("=", StringComparison.Ordinal))
+                    throw new ArgumentException("Formula-looking text would not calculate. Use an explicit {formula: ...} cell for calculation, or prefix intentional literal text with an apostrophe.");
                 return;
             }
 
@@ -210,7 +212,7 @@ namespace OMNIX.Core.Tools
                 ToolName = ToolNames.CreateDataTable,
                 Title = "Create Excel sheet: " + resolved,
                 Before = "All existing worksheets remain unchanged. A new sheet will be added.",
-                After = "Sheet '" + resolved + "': " + headers.Count + " columns, " + rows.Count +
+                After = "Sheet '" + resolved + "'; header row " + HeaderRow(plan) + "; title: " + ((string)plan["title"] ?? "none") + "; " + headers.Count + " columns, " + rows.Count +
                         " data rows, " + formulas + " real Excel formulas, " + dates +
                         " typed dates. A styled table and fitted columns will be created.",
                 ArgumentsJson = plan.ToString(Formatting.None)
@@ -280,6 +282,10 @@ namespace OMNIX.Core.Tools
                 table.TableStyle = "TableStyleMedium2";
 
                 ((Excel.Range)created.Cells[headerRow, 1]).Resize[1, headers.Count].WrapText = true;
+                var header = ((Excel.Range)created.Cells[headerRow, 1]).Resize[1, headers.Count];
+                header.HorizontalAlignment = Excel.XlHAlign.xlHAlignCenter;
+                header.VerticalAlignment = Excel.XlVAlign.xlVAlignCenter;
+                area.VerticalAlignment = Excel.XlVAlign.xlVAlignCenter;
                 area.Columns.AutoFit();
                 for (int c = 1; c <= headers.Count; c++)
                 {

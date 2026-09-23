@@ -30,14 +30,18 @@ namespace OMNIX.Core.AiGateway.Http
         private const int MaxModelCount = 5000;
 
         private readonly string _baseUrl;
+        private readonly string _catalogPath;
+        private readonly bool _pagedCatalog;
         private readonly bool _anthropic;
         private readonly string _providerDisplayName;
         private readonly Dictionary<string, string> _extraHeaders;
 
-        public OpenAiCompatibleClient(string baseUrl, string providerDisplayName, Dictionary<string, string> extraHeaders = null, bool anthropic = false)
+        public OpenAiCompatibleClient(string baseUrl, string providerDisplayName, Dictionary<string, string> extraHeaders = null, bool anthropic = false, string catalogPath = null, bool pagedCatalog = false)
         {
             if (string.IsNullOrWhiteSpace(baseUrl)) throw new ArgumentException("baseUrl is required", "baseUrl");
             _baseUrl = baseUrl.TrimEnd('/');
+            _catalogPath = catalogPath;
+            _pagedCatalog = pagedCatalog;
             _providerDisplayName = providerDisplayName;
             _extraHeaders = extraHeaders;
             _anthropic = anthropic;
@@ -544,6 +548,9 @@ namespace OMNIX.Core.AiGateway.Http
                 for (int page = 0; page < 50; page++)
                 {
                     string url = _baseUrl + "/models" + (cursor == null ? "" : "?after_id=" + Uri.EscapeDataString(cursor));
+                    if (_catalogPath != null)
+                        url = new Uri(new Uri(_baseUrl + "/"), _catalogPath).AbsoluteUri +
+                            (_pagedCatalog ? "&page=" + (page + 1) : "");
                     using (var req = new HttpRequestMessage(HttpMethod.Get, url))
                     {
                         if (_anthropic)
@@ -569,6 +576,13 @@ namespace OMNIX.Core.AiGateway.Http
                                 string id = (string)m["id"];
                                 if (!string.IsNullOrWhiteSpace(id) && !list.Contains(id)) list.Add(id);
                                 if (list.Count >= MaxModelCount) return list;
+                            }
+                            if (_pagedCatalog)
+                            {
+                                var data = root["data"] as JArray;
+                                if (data == null) throw OmnixException.Provider("Model catalog has no data array.");
+                                if (data.Count < 100) return list;
+                                continue;
                             }
                             if (!_anthropic || (bool?)root["has_more"] != true) return list;
                             cursor = (string)root["last_id"];

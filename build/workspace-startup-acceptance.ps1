@@ -424,6 +424,67 @@ class WorkspaceStartupRegression {
             }
         }
     }
+    sealed class SlowProvider : IProviderAdapter {
+        public int TransportThread;
+        public ProviderInfo Info { get { return new ProviderInfo {Id="custom",Kind=ProviderKind.Cloud,DisplayName="Slow fixture"}; } }
+        public void Configure(ProviderCredentials c) {}
+        public bool SupportsVisionNow() { return false; }
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct) { return Task.FromResult<IReadOnlyList<string>>(new string[0]); }
+        public Task<bool> TestConnectionAsync(CancellationToken ct) { return Task.FromResult(true); }
+        public Task<ChatResponse> SendAsync(ChatRequest request,Action<string> delta,CancellationToken ct) {
+            TransportThread=Thread.CurrentThread.ManagedThreadId;
+            Thread.Sleep(250); // Deliberately synchronous provider setup must not freeze Office.
+            for(int i=0;i<2000;i++) if(delta!=null) delta("x");
+            return Task.FromResult(new ChatResponse {Text="Done"});
+        }
+    }
+    static void ResponsiveGatewayRegression() {
+        var settings=SettingsManager.Instance.Settings;
+        string old=settings.SelectedProviderId; var privacy=settings.Privacy;
+        settings.SelectedProviderId="custom"; settings.Privacy=PrivacyMode.CloudAllowed;
+        int owner=Thread.CurrentThread.ManagedThreadId, ticks=0;
+        var heartbeat=new DispatcherTimer { Interval=TimeSpan.FromMilliseconds(10) };
+        heartbeat.Tick+=(sender,args)=>ticks++; heartbeat.Start();
+        try {
+            var registry=new ProviderRegistry(); var provider=new SlowProvider();
+            var list=(List<IProviderAdapter>)typeof(ProviderRegistry).GetField("_providers",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(registry);
+            list.Clear(); list.Add(provider);
+            var gateway=new OMNIX.Core.AiGateway.AiGateway(registry);
+            var runner=typeof(WorkspaceController).Assembly.GetType("OMNIX.Core.Ui.OfficeUi").GetMethod("RunAsync",BindingFlags.Public|BindingFlags.Static);
+            Func<Task> work=async ()=> {
+                await gateway.ChatAsync(new ChatRequest {UserTurn=new ChatTurn {Role=ChatRole.User,Text="Hello"}},new FakeHost(),part=>{},new ToolExecutor(),CancellationToken.None);
+                Check(Thread.CurrentThread.ManagedThreadId==owner,"Gateway continuation left Office STA");
+            };
+            var task=(Task)runner.Invoke(null,new object[]{Dispatcher.CurrentDispatcher,work});
+            var deadline=Stopwatch.StartNew();
+            while(!task.IsCompleted && deadline.ElapsedMilliseconds<5000) {
+                var frame=new DispatcherFrame();
+                Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>frame.Continue=false));
+                Dispatcher.PushFrame(frame);
+            }
+            Check(task.IsCompleted,"Responsive gateway timed out"); task.GetAwaiter().GetResult();
+            Check(ticks>=2 && provider.TransportThread!=owner,"Provider work blocked Office heartbeat");
+        } finally {heartbeat.Stop(); settings.SelectedProviderId=old; settings.Privacy=privacy;}
+    }
+    static void CatalogRoutesRegression() {
+        var portListener=new TcpListener(IPAddress.Loopback,0); portListener.Start();
+        int port=((IPEndPoint)portListener.LocalEndpoint).Port; portListener.Stop();
+        using(var server=new HttpListener()) using(var timeout=new CancellationTokenSource(5000)) {
+            string origin="http://127.0.0.1:"+port; server.Prefixes.Add(origin+"/"); server.Start();
+            var serving=Task.Run(async ()=> {
+                var context=await server.GetContextAsync();
+                Check(context.Request.Url.AbsolutePath=="/accounts/test/ai/models/search","Cloudflare discovery used wrong route");
+                Check(context.Request.QueryString["format"]=="openrouter" && context.Request.QueryString["page"]=="1","Cloudflare query missing");
+                Check(context.Request.Headers["Authorization"]=="Bearer fixture-key","Catalog auth missing");
+                byte[] bytes=Encoding.UTF8.GetBytes("{\"data\":[{\"id\":\"@cf/test\"}]}");
+                context.Response.ContentType="application/json"; context.Response.ContentLength64=bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes,0,bytes.Length); context.Response.Close();
+            });
+            var client=new OpenAiCompatibleClient(origin+"/accounts/test/ai/v1","Cloudflare fixture",catalogPath:"../models/search?format=openrouter&per_page=100",pagedCatalog:true);
+            var models=client.ListModelsAsync("fixture-key",timeout.Token).GetAwaiter().GetResult();
+            serving.GetAwaiter().GetResult(); Check(models.Count==1 && models[0]=="@cf/test","Cloudflare catalog decode failed");
+        }
+    }
     static void AsyncContextRegression() {
         SynchronizationContext.SetSynchronizationContext(null);
         int owner=Thread.CurrentThread.ManagedThreadId;
@@ -507,9 +568,12 @@ class WorkspaceStartupRegression {
             var titled=ExcelTableBuilder.ValidatePlan("{\"sheet\":\"Gold\",\"title\":\"Shop\",\"headers\":[\"Weight\",\"Total\"],\"rows\":[[5,{\"formula\":\"=A5*2\"}]]}");
             Check(ExcelTableBuilder.HeaderRow(titled)==4,"Separate heading did not reserve rows above table");
             try { ExcelTableBuilder.ValidatePlan("{\"sheet\":\"Gold\",\"title\":\"Shop\",\"startRow\":1,\"headers\":[\"A\"],\"rows\":[]}"); throw new Exception("Overlapping heading accepted"); } catch(ArgumentException) {}
+            try { ExcelTableBuilder.ValidatePlan("{\"sheet\":\"Gold\",\"headers\":[\"A\"],\"rows\":[[\"=A2*2\"]]}"); throw new Exception("Unevaluated formula string accepted"); } catch(ArgumentException) {}
             Check(OfficeCapabilityRegistry.Exists(HostType.Excel,"sheet.heading"),"Native heading capability unavailable");
             TransportRegression();
             AsyncContextRegression();
+            ResponsiveGatewayRegression();
+            CatalogRoutesRegression();
             CapabilityRegression();
             AccessRecoveryRegression();
             NativeGatewayRegression();

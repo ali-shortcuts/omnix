@@ -45,6 +45,8 @@ namespace OMNIX.Core.Settings
         public Dictionary<string, List<string>> SavedModels { get; set; }
         public int ExecutionStepDelayMs { get; set; }
         public string BusinessLocale { get; set; }
+        public string CloudflareAccountId { get; set; }
+        public bool ConfirmEveryWrite { get; set; }
         public CustomProviderConfig CustomProvider { get; set; }
         public CustomProviderConfig AgentRouter { get; set; }
         public CustomProviderConfig EndpointConfig(string id)

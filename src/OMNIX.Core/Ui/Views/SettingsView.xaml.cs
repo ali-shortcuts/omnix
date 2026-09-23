@@ -33,6 +33,7 @@ namespace OMNIX.Core.Ui
         private static readonly string[] AllowedOfficialHosts =
         {
             "docs.siliconflow.com", "cloud.siliconflow.com",
+            "developers.cloudflare.com", "dash.cloudflare.com",
             "ai.google.dev",
             "aistudio.google.com",
             "groq.com",
@@ -57,6 +58,21 @@ namespace OMNIX.Core.Ui
         {
             InitializeComponent();
             Unloaded += (sender, args) => CancelProviderOperation();
+            ApiKeyBox.PasswordChanged += (sender, args) => InvalidateVerification();
+            CustomBaseUrlBox.TextChanged += (sender, args) => InvalidateVerification();
+            CloudflareAccountBox.TextChanged += (sender, args) => InvalidateVerification();
+            CustomApiTypeCombo.SelectionChanged += (sender, args) => InvalidateVerification();
+        }
+
+        private void InvalidateVerification()
+        {
+            if (_loading) return;
+            _modelVerification.Clear();
+            VerifiedModelsPanel.Children.Clear();
+            ModelVerificationText.Text = "";
+            ModelVerificationScroll.Visibility = Visibility.Collapsed;
+            WorkingModelsOnlyCheck.IsChecked = false;
+            WorkingModelsOnlyCheck.Visibility = Visibility.Collapsed;
         }
 
         public void Initialize(WorkspaceController controller)
@@ -89,6 +105,8 @@ namespace OMNIX.Core.Ui
                 ModelVerificationText.Text = "";
             VerifiedModelsPanel.Children.Clear();
                 VerifiedModelsPanel.Children.Clear();
+                CloudflareAccountBox.Text = settings.CloudflareAccountId ?? "";
+                ConfirmWritesCheck.IsChecked = settings.ConfirmEveryWrite;
                 VisibleStepsCheck.IsChecked = settings.ExecutionStepDelayMs > 0;
                 BusinessLocaleBox.Text = settings.BusinessLocale ?? "Afghanistan; Dari; currency AFN";
                 ModelCombo.ItemsSource = new[] { "Custom Model" };
@@ -148,6 +166,7 @@ namespace OMNIX.Core.Ui
         {
             if (info == null) return;
 
+            CloudflareSection.Visibility = info.Id == "cloudflare" ? Visibility.Visible : Visibility.Collapsed;
             CustomProviderSection.Visibility = (info.Id == "custom" || info.Id == "agentrouter") ? Visibility.Visible : Visibility.Collapsed;
             LocalProviderSection.Visibility = info.Id == "ollama" || info.Id == "lmstudio" ? Visibility.Visible : Visibility.Collapsed;
             bool needsKey = info.RequiresApiKey;
@@ -250,6 +269,7 @@ namespace OMNIX.Core.Ui
             VerifyModelsButton.IsEnabled = !busy;
             WorkingModelsOnlyCheck.IsEnabled = !busy;
             CancelTestButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            CloudflareAccountBox.IsEnabled = !busy;
             ModelCombo.IsEnabled = !busy;
             ManualModelBox.IsEnabled = !busy;
             ApiKeyBox.IsEnabled = !busy;
@@ -534,7 +554,7 @@ namespace OMNIX.Core.Ui
             ModelVerificationText.Text = "";
             VerifiedModelsPanel.Children.Clear();
             TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
-            TestResultText.Text = "Verifying detected models one at a time. Stop is available; each model has a bounded timeout.";
+            TestResultText.Text = "Testing models…";
 
             try
             {
@@ -571,7 +591,7 @@ namespace OMNIX.Core.Ui
             {
                 if (ReferenceEquals(_providerOperation, operation))
                 {
-                    TestResultText.Text = "Model verification stopped. Completed results were kept for this Settings view.";
+                    TestResultText.Text = "Stopped. Results kept.";
                     TestResultText.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
                     WorkingModelsOnlyCheck.Visibility = _modelVerification.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
                     RenderVerificationSummary(_modelVerification.Count, Math.Min(100, _discoveredModels.Count));
@@ -666,6 +686,9 @@ namespace OMNIX.Core.Ui
                 };
                 row.Children.Add(keep);
                 row.Children.Add(select);
+                var state = new TextBlock { Text = "  " + result.State, VerticalAlignment = VerticalAlignment.Center };
+                state.SetResourceReference(TextBlock.ForegroundProperty, "B.ForegroundDim");
+                row.Children.Add(state);
                 VerifiedModelsPanel.Children.Add(row);
             }
             ModelVerificationScroll.Visibility = ordered.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -767,6 +790,7 @@ namespace OMNIX.Core.Ui
                 customConfig.Model = EffectiveModelId;
             }
 
+            if (_displayedProviderId == "cloudflare") settings.CloudflareAccountId = CloudflareAccountBox.Text.Trim();
             settings.Models[_displayedProviderId] = EffectiveModelId;
             string key = ApiKeyBox.Password;
             if (!string.IsNullOrWhiteSpace(key))
@@ -782,6 +806,7 @@ namespace OMNIX.Core.Ui
             else if (PrivacyCloudAllowed.IsChecked == true) settings.Privacy = PrivacyMode.CloudAllowed;
             else settings.Privacy = PrivacyMode.AskBeforeSending;
 
+            settings.ConfirmEveryWrite = ConfirmWritesCheck.IsChecked == true;
             settings.ExecutionStepDelayMs = VisibleStepsCheck.IsChecked == true ? 350 : 0;
             settings.BusinessLocale = BusinessLocaleBox.Text.Trim();
             settings.PreferLocalWhenAvailable = PreferLocalCheck.IsChecked == true;

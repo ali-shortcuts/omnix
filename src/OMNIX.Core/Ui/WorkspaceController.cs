@@ -67,7 +67,16 @@ namespace OMNIX.Core.Ui
                     string.Join("\n\n", recent.Select(t => t.Role + ": " + (t.Text.Length > 1200 ? t.Text.Substring(0, 1200) + " [excerpt]" : t.Text)));
             };
             _toolExecutor.WriteConfirmation = preview =>
-                RunOnUiThread(() => OmnixDialogs.ConfirmWritePreview(preview));
+            {
+                bool routine = preview.ToolName == ToolNames.CreateDataTable ||
+                    preview.ToolName == ToolNames.FormatRange || preview.ToolName == ToolNames.HighlightRange;
+                if (!SettingsManager.Instance.Settings.ConfirmEveryWrite && routine)
+                {
+                    RuntimeDiagnosticJournal.Event("write_policy", preview.ToolName, "routine_auto_apply", null, null, null);
+                    return Task.FromResult(true);
+                }
+                return RunOnUiThread(() => OmnixDialogs.ConfirmWritePreview(preview));
+            };
 
             // This callback now belongs only to THIS workspace's PrivacyGate, so "remember for this
             // session" cannot silently approve a different document window.
@@ -343,14 +352,26 @@ namespace OMNIX.Core.Ui
             catch (OmnixException ex)
             {
                 if (_disposed || !ValidateCurrentOfficeDocumentScope(requestDocKey, requestScopeVersion)) return;
-                bubble.ReplaceText("");
+                lock (deltaGate) { acceptDeltas = false; }
+                streamTimer.Stop();
+                flushDeltas();
+                assistantTurn.Text = sb.ToString() + Environment.NewLine + "[Interrupted — check applied changes before retrying.]";
+                bubble.ReplaceText(assistantTurn.Text);
+                _turns.Add(assistantTurn);
+                Persist(requestDocKey);
                 View.Chat.ShowError(ErrorPresenter.Format(ex));
             }
             catch (Exception ex)
             {
                 Logger.Error("ui", "SendMessage failed", ex);
                 if (_disposed || !ValidateCurrentOfficeDocumentScope(requestDocKey, requestScopeVersion)) return;
-                bubble.ReplaceText("");
+                lock (deltaGate) { acceptDeltas = false; }
+                streamTimer.Stop();
+                flushDeltas();
+                assistantTurn.Text = sb.ToString() + Environment.NewLine + "[Interrupted — check applied changes before retrying.]";
+                bubble.ReplaceText(assistantTurn.Text);
+                _turns.Add(assistantTurn);
+                Persist(requestDocKey);
                 View.Chat.ShowError(ErrorPresenter.Format(ex));
             }
             finally

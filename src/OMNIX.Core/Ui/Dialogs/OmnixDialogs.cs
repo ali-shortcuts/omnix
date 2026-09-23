@@ -158,7 +158,7 @@ namespace OMNIX.Core.Ui.Dialogs
 
             panel.Children.Add(new ThemeText(preview.ToolName == Tools.ToolNames.CreateDataTable
                 ? "To reverse this operation, delete the new worksheet. Ctrl+Z is not guaranteed."
-                : Localization.Strings.T("S.Tools.UndoHint"), 10.5, dim: true));
+                : "Undo availability depends on this Office operation.", 10.5, dim: true));
 
             var buttons = new StackPanel
             {

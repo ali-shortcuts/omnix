@@ -31,6 +31,7 @@ namespace OMNIX.Core.AiGateway
                 new CompatiblePresetAdapter("sambanova", "SambaNova", "https://api.sambanova.ai/v1", "https://docs.sambanova.ai/docs/en/get-started/api-keys-urls", "https://cloud.sambanova.ai/"),
                 new CompatiblePresetAdapter("nvidia", "NVIDIA", "https://integrate.api.nvidia.com/v1", "https://docs.api.nvidia.com/nim/reference/llm-apis", "https://build.nvidia.com/"),
                 new CompatiblePresetAdapter("siliconflow", "SiliconFlow", "https://api.siliconflow.com/v1", "https://docs.siliconflow.com/en/userguide/quickstart", "https://cloud.siliconflow.com/"),
+                new CloudflareAdapter(),
                 new GeminiAdapter(),
                 new GroqAdapter(),
                 new OpenRouterAdapter(),
@@ -43,7 +44,7 @@ namespace OMNIX.Core.AiGateway
             _localAvailability = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             ApplyOfficialMetadata();
             var names = new Dictionary<string, string> {
-                { "siliconflow", "SiliconFlow" }, { "custom", "Custom Provider" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
+                { "cloudflare", "Cloudflare" }, { "siliconflow", "SiliconFlow" }, { "custom", "Custom Provider" }, { "agentrouter", "Agent Router" }, { "sambanova", "SambaNova" }, { "nvidia", "NVIDIA" }, { "gemini", "Gemini" }, { "groq", "Groq" },
                 { "openrouter", "OpenRouter" }, { "mistral", "Mistral" },
                 { "huggingface", "Hugging Face" }, { "cerebras", "Cerebras" },
                 { "ollama", "Ollama" }, { "lmstudio", "LM Studio" }
@@ -53,6 +54,11 @@ namespace OMNIX.Core.AiGateway
 
         private void ApplyOfficialMetadata()
         {
+            SetMetadata("cloudflare", "https://developers.cloudflare.com/workers-ai/",
+                "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/", "https://dash.cloudflare.com/", "",
+                ProviderAccessProfile.FreeTierAvailable,
+                "Daily free allocation for eligible models; some models require a paid plan. Account ID and API token required.",
+                "https://developers.cloudflare.com/workers-ai/platform/pricing/", "2026-09-23");
             SetMetadata("siliconflow", "https://www.siliconflow.com/",
                 "https://docs.siliconflow.com/en/userguide/quickstart", "https://cloud.siliconflow.com/", "",
                 ProviderAccessProfile.FreeModelsAvailable,

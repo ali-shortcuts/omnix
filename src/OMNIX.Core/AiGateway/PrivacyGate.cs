@@ -257,7 +257,15 @@ namespace OMNIX.Core.AiGateway
                 case "huggingface":
                 case "cerebras":
                 case "sambanova":
+                case "siliconflow":
                 case "nvidia":
+                    creds.ApiKey = SettingsManager.Instance.GetApiKey(providerId);
+                    break;
+                case "cloudflare":
+                    string account = (settings.CloudflareAccountId ?? "").Trim();
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(account, "^[a-fA-F0-9]{32}$"))
+                        throw OmnixException.Model("Enter your Cloudflare account ID (32 hexadecimal characters).");
+                    creds.BaseUrl = "https://api.cloudflare.com/client/v4/accounts/" + account + "/ai/v1";
                     creds.ApiKey = SettingsManager.Instance.GetApiKey(providerId);
                     break;
                 case "ollama":
